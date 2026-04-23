@@ -90,3 +90,4 @@ class AnalyzeRequest(BaseModel):
 class ExportPdfRequest(BaseModel):
     analysis_result: PatientAnalysis
     patient_name: Optional[str] = "Anonymous Patient"
+    file_id: Optional[str] = None

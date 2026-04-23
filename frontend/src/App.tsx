@@ -11,6 +11,13 @@ import SchedulePage from './pages/SchedulePage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ProtectedRoute from './components/ProtectedRoute';
+import ScrollToTop from './components/ScrollToTop';
+import UseCasesPage from './pages/UseCasesPage';
+import FeaturesPage from './pages/FeaturesPage';
+import PricingPage from './pages/PricingPage';
+import SecurityPage from './pages/SecurityPage';
+import IntegrationsPage from './pages/IntegrationsPage';
+import ResourcesPage from './pages/ResourcesPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import './index.css';
 
@@ -26,6 +33,12 @@ function Navbar() {
     ? []
     : [
         { to: '/', label: 'Home' },
+        { to: '/features', label: 'Features' },
+        { to: '/use-cases', label: 'Use Cases' },
+        { to: '/integrations', label: 'Integrations' },
+        { to: '/pricing', label: 'Pricing' },
+        { to: '/resources', label: 'Resources' },
+        { to: '/security', label: 'Trust' },
         { to: '/about', label: 'About' },
         { to: '/contact', label: 'Contact' },
       ];
@@ -231,6 +244,337 @@ function Navbar() {
         </div>
       )}
     </nav>
+  );
+}
+
+/* ── Interactive Demo Tabs ───────────────────────────────────────────── */
+type DemoKey = 'doctor' | 'patient' | 'video';
+
+const demoContent: Record<DemoKey, {
+  label: string;
+  icon: string;
+  color: string;
+  heading: string;
+  intro: string;
+  panelTitle: string;
+  lines: Array<{ label?: string; text: string; emphasis?: boolean }>;
+  cta: { to: string; label: string };
+}> = {
+  doctor: {
+    label: 'Doctor',
+    icon: '🩺',
+    color: '#22d3ee',
+    heading: 'Talk. We document.',
+    intro:
+      'You consult normally. MediSense captures every word, tags each speaker, and drafts a SOAP note the moment the call ends.',
+    panelTitle: 'Live transcript · Room 4F-88C2',
+    lines: [
+      { label: 'DOCTOR', text: 'How long have you had the chest pain?' },
+      { label: 'PATIENT', text: 'About three days now. It\'s sharp when I breathe in.' },
+      { label: 'DOCTOR', text: 'Any fever, cough, or recent travel?' },
+      { label: 'PATIENT', text: 'No fever. No travel.' },
+      { text: '— SOAP draft ready in 8s —', emphasis: true },
+      { label: 'AI SOAP', text: 'S: 34F · 3-day pleuritic chest pain. Denies fever, cough, travel.' },
+      { label: 'AI SOAP', text: 'A: Likely costochondritis; rule out PE if risk factors.' },
+    ],
+    cta: { to: '/doctor', label: 'Open Doctor Dashboard →' },
+  },
+  patient: {
+    label: 'Patient',
+    icon: '🧬',
+    color: '#4ade80',
+    heading: 'Upload a report. Get a plan.',
+    intro:
+      'Drop in any PDF or photo. We read it — even scanned — explain every finding in plain language, and build a personalised care plan.',
+    panelTitle: 'Health guide · Metabolic panel',
+    lines: [
+      { text: 'HbA1c  7.4 %   (ref < 5.7)   HIGH', emphasis: true },
+      { text: 'Fasting glucose  148 mg/dL   HIGH', emphasis: true },
+      { text: 'LDL cholesterol  118 mg/dL   BORDERLINE' },
+      { text: '— AI explanation —', emphasis: true },
+      { label: 'Plain', text: 'Your blood sugar is running high — suggests early type-2 diabetes.' },
+      { label: 'Plan', text: 'Diet: leafy greens, legumes, fatty fish 2×/week. Avoid refined sugar.' },
+      { label: 'Plan', text: 'Move: brisk walk 30 min/day, resistance 2×/week.' },
+      { label: 'Refer', text: 'Endocrinologist — within 1 week.' },
+    ],
+    cta: { to: '/patient', label: 'Open Patient Dashboard →' },
+  },
+  video: {
+    label: 'Video Call',
+    icon: '🎥',
+    color: '#a78bfa',
+    heading: 'Consult. Record. Done.',
+    intro:
+      'Browser-native WebRTC. Patients join with a six-character code — no downloads. Transcript and SOAP note persist to the doctor\'s dashboard automatically.',
+    panelTitle: 'Consult room · A4F9-88C2',
+    lines: [
+      { text: 'Room A4F9-88C2 · 2 participants · Active' },
+      { text: '→ Doctor connected (00:00)' },
+      { text: '→ Patient connected (00:04)' },
+      { text: '→ Transcript streaming · Audio 48 kHz' },
+      { text: '— Call ended 12:34 —', emphasis: true },
+      { label: 'Saved', text: 'SOAP draft · Transcript · Session PDF' },
+      { label: 'Next', text: 'Doctor reviews → 1-click export to chart.' },
+    ],
+    cta: { to: '/consultation/schedule', label: 'Schedule a Call →' },
+  },
+};
+
+function InteractiveDemo() {
+  const [tab, setTab] = useState<DemoKey>('doctor');
+  const [visibleLines, setVisibleLines] = useState(0);
+  const demo = demoContent[tab];
+
+  useEffect(() => {
+    setVisibleLines(0);
+    let i = 0;
+    const total = demo.lines.length;
+    const timer = window.setInterval(() => {
+      i += 1;
+      setVisibleLines(i);
+      if (i >= total) window.clearInterval(timer);
+    }, 420);
+    return () => window.clearInterval(timer);
+  }, [tab, demo.lines.length]);
+
+  return (
+    <section style={{
+      padding: '80px 24px',
+      borderTop: '1px solid var(--border-subtle)',
+      background: 'rgba(6,13,27,0.3)',
+    }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{
+            display: 'inline-block', padding: '6px 14px', borderRadius: 20,
+            background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
+            fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
+            textTransform: 'uppercase', letterSpacing: '0.5px',
+          }}>
+            Live Demo
+          </div>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 14 }}>
+            See it do the thing.
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', maxWidth: 620, margin: '0 auto', lineHeight: 1.6 }}>
+            Pick a workflow — the panel on the right plays a simulated sample of what MediSense actually outputs.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 24 }}>
+          {(Object.keys(demoContent) as DemoKey[]).map(k => {
+            const d = demoContent[k];
+            const active = tab === k;
+            return (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                style={{
+                  padding: '10px 20px', borderRadius: 10,
+                  border: `1px solid ${active ? d.color : 'var(--border-subtle)'}`,
+                  background: active ? `${d.color}18` : 'rgba(15,30,60,0.4)',
+                  color: active ? d.color : 'var(--text-secondary)',
+                  fontSize: '0.9rem', fontWeight: 700,
+                  cursor: 'pointer', transition: 'all 0.2s',
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                <span>{d.icon}</span>
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="glass-card" style={{
+          padding: 0, overflow: 'hidden',
+          border: `1px solid ${demo.color}30`,
+        }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          }}>
+            <div style={{ padding: '36px 32px', borderRight: '1px solid var(--border-subtle)' }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '4px 10px', borderRadius: 6,
+                background: `${demo.color}1f`, color: demo.color,
+                border: `1px solid ${demo.color}40`,
+                fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.5px',
+                textTransform: 'uppercase', marginBottom: 16,
+              }}>
+                <span>{demo.icon}</span>
+                {demo.label} workflow
+              </div>
+              <h3 style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: 14, lineHeight: 1.3 }}>
+                {demo.heading}
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, fontSize: '0.92rem', marginBottom: 24 }}>
+                {demo.intro}
+              </p>
+              <Link to={demo.cta.to}>
+                <button className="btn-primary" style={{
+                  padding: '12px 22px', fontSize: '0.9rem',
+                  background: `linear-gradient(135deg, ${demo.color} 0%, ${demo.color}cc 100%)`,
+                }}>
+                  {demo.cta.label}
+                </button>
+              </Link>
+            </div>
+
+            <div style={{
+              padding: '24px 26px',
+              background: 'rgba(6,13,27,0.7)',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              minHeight: 320,
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.5px',
+                color: demo.color, textTransform: 'uppercase', marginBottom: 18,
+              }}>
+                <span style={{
+                  width: 8, height: 8, background: demo.color, borderRadius: '50%',
+                  boxShadow: `0 0 10px ${demo.color}`, animation: 'pulse-dot 1.4s infinite',
+                }} />
+                {demo.panelTitle}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {demo.lines.slice(0, visibleLines).map((line, i) => (
+                  <div
+                    key={`${tab}-${i}`}
+                    style={{
+                      fontSize: '0.82rem',
+                      lineHeight: 1.6,
+                      color: line.emphasis ? demo.color : 'var(--text-primary)',
+                      opacity: 0,
+                      animation: 'demo-fade 0.35s ease-out forwards',
+                      fontWeight: line.emphasis ? 700 : 400,
+                    }}
+                  >
+                    {line.label && (
+                      <span style={{
+                        color: demo.color, fontWeight: 700, marginRight: 8,
+                        fontSize: '0.72rem', letterSpacing: '0.4px',
+                      }}>
+                        [{line.label}]
+                      </span>
+                    )}
+                    {line.text}
+                  </div>
+                ))}
+                {visibleLines < demo.lines.length && (
+                  <div style={{
+                    display: 'inline-block', width: 8, height: 14, background: demo.color,
+                    animation: 'demo-cursor 0.8s infinite',
+                  }} />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── FAQ Accordion ───────────────────────────────────────────────────── */
+const landingFaq = [
+  {
+    q: 'Is MediSense actually used in real clinics?',
+    a: 'Yes. We\'re live in family medicine, internal medicine, cardiology, and endocrinology practices. Most clinics are up and running in a week; the longest rollout to date was 18 days.',
+  },
+  {
+    q: 'Does the AI replace the doctor?',
+    a: 'No — and it never will. Every SOAP note, every finding, and every care plan is a draft a clinician reviews and edits. The UI highlights AI-generated text so it\'s never mistaken for clinician input.',
+  },
+  {
+    q: 'How accurate is the medical transcription?',
+    a: '95 %+ on general speech and 92 %+ on medical terminology (drug names, ICD codes, dosages) in our audits. We publish accuracy benchmarks openly in the Resources section.',
+  },
+  {
+    q: 'What does it cost?',
+    a: 'Free for individual clinicians doing up to 20 consults a month. Clinic plans from $79/provider/month. See the full pricing page — no hidden fees, no per-minute transcription charges.',
+  },
+  {
+    q: 'Can I use it for telehealth / video calls?',
+    a: 'Yes. WebRTC video consultations are built in. Patients join with a 6-character code from any browser — no app install. Transcription and SOAP generation work identically to in-person calls.',
+  },
+  {
+    q: 'What about my existing EHR?',
+    a: 'We integrate with Epic, Cerner, athenahealth, DrChrono, and OpenEMR via FHIR R4. One-click PDF export works with every other system. See the Integrations page for the full list.',
+  },
+];
+
+function FaqSection() {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <section style={{
+      padding: '80px 24px',
+      borderTop: '1px solid var(--border-subtle)',
+    }}>
+      <div style={{ maxWidth: 820, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 40 }}>
+          <div style={{
+            display: 'inline-block', padding: '6px 14px', borderRadius: 20,
+            background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
+            fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
+            textTransform: 'uppercase', letterSpacing: '0.5px',
+          }}>
+            FAQ
+          </div>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 14 }}>
+            Questions we get every week
+          </h2>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Don't see yours? <Link to="/contact" style={{ color: 'var(--brand-teal)', fontWeight: 600 }}>Drop us a line</Link>.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {landingFaq.map((item, i) => {
+            const isOpen = open === i;
+            return (
+              <div
+                key={i}
+                className="glass-card"
+                style={{
+                  padding: 0, overflow: 'hidden',
+                  borderLeft: `4px solid ${isOpen ? 'var(--brand-teal)' : 'transparent'}`,
+                  transition: 'border-color 0.2s',
+                }}
+              >
+                <button
+                  onClick={() => setOpen(isOpen ? null : i)}
+                  style={{
+                    width: '100%', padding: '18px 22px',
+                    background: 'transparent', border: 'none', color: 'inherit',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    gap: 14, cursor: 'pointer', textAlign: 'left',
+                    fontSize: '0.95rem', fontWeight: 700,
+                  }}
+                >
+                  <span>{item.q}</span>
+                  <span style={{
+                    color: 'var(--brand-teal)', fontSize: '1.25rem', fontWeight: 700,
+                    transform: isOpen ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s',
+                    flexShrink: 0,
+                  }}>+</span>
+                </button>
+                {isOpen && (
+                  <div style={{
+                    padding: '0 22px 20px', color: 'var(--text-secondary)',
+                    fontSize: '0.9rem', lineHeight: 1.65,
+                  }}>
+                    {item.a}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -539,6 +883,9 @@ function LandingPage() {
         </div>
       </section>
 
+      {/* ── INTERACTIVE DEMO ──────────────────────────── */}
+      <InteractiveDemo />
+
       {/* ── WHY CHOOSE US ─────────────────────────────── */}
       <section style={{ padding: '80px 24px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -653,6 +1000,9 @@ function LandingPage() {
         </div>
       </section>
 
+      {/* ── FAQ ───────────────────────────────────────── */}
+      <FaqSection />
+
       {/* ── CTA ───────────────────────────────────────── */}
       <section style={{ padding: '80px 24px' }}>
         <div className="glass-card" style={{
@@ -716,9 +1066,13 @@ function Footer() {
     ? []
     : [
         { to: '/about', label: 'About Us' },
+        { to: '/use-cases', label: 'Use Cases' },
+        { to: '/features', label: 'Features' },
+        { to: '/pricing', label: 'Pricing' },
+        { to: '/integrations', label: 'Integrations' },
+        { to: '/resources', label: 'Resources' },
+        { to: '/security', label: 'Trust Center' },
         { to: '/contact', label: 'Contact' },
-        { to: '#', label: 'Careers' },
-        { to: '#', label: 'Blog' },
       ];
 
   return (
@@ -835,12 +1189,19 @@ export default function App() {
   return (
     <AuthProvider>
       <Router>
+        <ScrollToTop />
         <div className="bg-mesh" />
         <Navbar />
         <Routes>
           <Route path="/" element={<PublicOnly><LandingPage /></PublicOnly>} />
           <Route path="/about" element={<PublicOnly><AboutPage /></PublicOnly>} />
           <Route path="/contact" element={<PublicOnly><ContactPage /></PublicOnly>} />
+          <Route path="/features" element={<PublicOnly><FeaturesPage /></PublicOnly>} />
+          <Route path="/use-cases" element={<PublicOnly><UseCasesPage /></PublicOnly>} />
+          <Route path="/pricing" element={<PublicOnly><PricingPage /></PublicOnly>} />
+          <Route path="/security" element={<PublicOnly><SecurityPage /></PublicOnly>} />
+          <Route path="/integrations" element={<PublicOnly><IntegrationsPage /></PublicOnly>} />
+          <Route path="/resources" element={<PublicOnly><ResourcesPage /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
           <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
           <Route

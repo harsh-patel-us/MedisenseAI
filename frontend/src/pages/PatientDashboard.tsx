@@ -52,7 +52,7 @@ export default function PatientDashboard() {
     if (!analysis) return;
     setExporting(true);
     try {
-      const blob = await exportPatientPdf(analysis, 'Patient');
+      const blob = await exportPatientPdf(analysis, 'Patient', uploadData?.file_id);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

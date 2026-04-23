@@ -25,6 +25,7 @@ from services.claude_service import generate_soap_note
 from services.pdf_export import generate_soap_pdf
 from services.auth_service import require_role
 from utils.helpers import generate_id, format_transcript_for_prompt
+from utils.storage import save_soap_pdf
 from database import get_db, ConsultationSession, User
 
 logger = logging.getLogger(__name__)
@@ -158,15 +159,23 @@ async def generate_note(
         logger.error(f"SOAP generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"SOAP note generation failed: {str(e)}")
 
-    # Persist session
-    session = ConsultationSession(
-        id=request.session_id,
-        labeled_transcript=json.dumps(transcript_dicts),
-        extracted_entities=json.dumps(entities_raw),
-        soap_note=json.dumps(soap_dict),
-        status="completed",
+    # Persist session (upsert — /generate-note may be called multiple times per session)
+    existing = await db.execute(
+        select(ConsultationSession).where(ConsultationSession.id == request.session_id)
     )
-    db.add(session)
+    session = existing.scalar_one_or_none()
+    if session is None:
+        session = ConsultationSession(id=request.session_id)
+        db.add(session)
+
+    session.doctor_id = _user.id
+    session.doctor_name = _user.full_name
+    session.raw_transcript = full_text
+    session.labeled_transcript = json.dumps(transcript_dicts)
+    session.extracted_entities = json.dumps(entities_raw)
+    session.soap_note = json.dumps(soap_dict)
+    session.status = "completed"
+
     await db.commit()
 
     return GenerateNoteResponse(
@@ -179,18 +188,37 @@ async def generate_note(
 @router.post("/export-pdf")
 async def export_soap_pdf(
     request: ExportPdfRequest,
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_role("doctor")),
 ):
-    """Generate and return a SOAP note PDF."""
+    """Generate, persist, and return a SOAP note PDF."""
     soap_dict = request.soap_note.model_dump()
     pdf_bytes = generate_soap_pdf(
         soap_note=soap_dict,
         patient_name=request.patient_name or "Anonymous Patient",
-        doctor_name=request.doctor_name or "Attending Physician",
+        doctor_name=request.doctor_name or _user.full_name or "Attending Physician",
         session_id=request.session_id,
     )
     if not pdf_bytes:
         raise HTTPException(status_code=500, detail="PDF generation failed.")
+
+    if request.session_id:
+        try:
+            pdf_path = save_soap_pdf(request.session_id, pdf_bytes)
+            result = await db.execute(
+                select(ConsultationSession).where(ConsultationSession.id == request.session_id)
+            )
+            session = result.scalar_one_or_none()
+            if session is not None:
+                session.soap_pdf_path = pdf_path
+                session.soap_pdf_size = len(pdf_bytes)
+                if request.patient_name:
+                    session.patient_name = request.patient_name
+                if request.doctor_name:
+                    session.doctor_name = request.doctor_name
+                await db.commit()
+        except Exception as exc:
+            logger.warning(f"Could not persist SOAP PDF for session {request.session_id}: {exc}")
 
     return Response(
         content=pdf_bytes,
@@ -207,9 +235,12 @@ async def get_sessions(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_role("doctor")),
 ):
-    """Return list of past consultation sessions (most recent first)."""
+    """Return list of this doctor's past consultation sessions (most recent first)."""
     result = await db.execute(
-        select(ConsultationSession).order_by(ConsultationSession.created_at.desc()).limit(50)
+        select(ConsultationSession)
+        .where(ConsultationSession.doctor_id == _user.id)
+        .order_by(ConsultationSession.created_at.desc())
+        .limit(50)
     )
     sessions = result.scalars().all()
     return [
@@ -217,7 +248,7 @@ async def get_sessions(
             id=s.id,
             created_at=s.created_at.isoformat() if s.created_at else "",
             doctor_name=s.doctor_name,
-            patient_identifier=s.patient_identifier,
+            patient_identifier=s.patient_identifier or s.patient_name,
             status=s.status,
         )
         for s in sessions

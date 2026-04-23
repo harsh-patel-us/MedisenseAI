@@ -32,13 +32,15 @@ export async function analyzeReport(
 
 export async function exportPatientPdf(
   analysisResult: PatientAnalysis,
-  patientName?: string
+  patientName?: string,
+  fileId?: string
 ): Promise<Blob> {
   const response = await axios.post(
     `${API_BASE}/patient/export-pdf`,
     {
       analysis_result: analysisResult,
       patient_name: patientName || 'Patient',
+      file_id: fileId,
     },
     { responseType: 'blob' }
   );
