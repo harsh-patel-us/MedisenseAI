@@ -1,0 +1,46 @@
+# MediSense AI — Backend Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# ── Web framework ──────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ── AI / LLM ───────────────────────────────────────────────────────────────
+openai>=1.30.0                # OpenRouter is OpenAI-compatible
+anthropic>=0.25.0             # Optional: direct Anthropic client
+
+# ── Settings & env ─────────────────────────────────────────────────────────
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# ── Database ───────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+aiosqlite>=0.20.0             # Async SQLite driver
+
+# ── Speech-to-text ─────────────────────────────────────────────────────────
+# openai-whisper              # Uncomment to enable local Whisper STT
+# pyannote.audio>=3.1.0      # Uncomment for real speaker diarization (needs HF token)
+
+# ── Medical NER ────────────────────────────────────────────────────────────
+# scispacy>=0.5.1             # Uncomment to enable scispaCy NER
+# Install medical model separately:
+# pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_sm-0.5.1.tar.gz
+
+# ── Document parsing ───────────────────────────────────────────────────────
+pymupdf>=1.23.0               # PDF text extraction (fitz)
+pillow>=10.0.0                # Image processing for OCR
+
+# ── OCR ────────────────────────────────────────────────────────────────────
+pytesseract>=0.3.10           # Tesseract OCR wrapper
+# Note: Tesseract binary must be installed separately on Windows:
+# Download from: https://github.com/UB-Mannheim/tesseract/wiki
+
+# ── PDF export ─────────────────────────────────────────────────────────────
+reportlab>=4.0.0              # Generate branded PDF reports
+
+# ── Auth ───────────────────────────────────────────────────────────────────
+bcrypt>=4.0.0                 # Password hashing
+PyJWT>=2.8.0                  # JWT encode/decode
+email-validator>=2.0.0        # Required by pydantic EmailStr

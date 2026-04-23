@@ -1,0 +1,9 @@
+Doctor: Good morning, what brings you in today?
+Patient: I've been having chest tightness since this morning, doctor.
+Doctor: Can you describe the pain? Is it sharp or dull?
+Patient: More like pressure, maybe 6 out of 10. It gets worse when I climb stairs.
+Doctor: Any shortness of breath or sweating?
+Patient: A little breathless, yes. No fever though.
+Doctor: Have you had any heart problems before?
+Patient: No, this is the first time. I'm 45 years old.
+Doctor: Okay. I'm going to order an ECG and troponin blood test. Avoid any strenuous activity until we get the results. Come back in 48 hours or go to the ER if the pain gets worse.

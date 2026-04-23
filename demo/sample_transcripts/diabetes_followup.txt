@@ -1,0 +1,9 @@
+Doctor: Hello, welcome back! How are you doing since our last visit?
+Patient: Thank you, doctor. My sugar levels have been mostly high this past month.
+Doctor: How high? Have you been checking regularly?
+Patient: Yes, fasting is around 140-150 and after meals it goes up to 220 sometimes.
+Doctor: That's quite elevated. Are you taking your Metformin regularly?
+Patient: Yes, 500mg twice a day. But I think I need a higher dose.
+Doctor: Let me check your other symptoms. Any blurred vision, tingling in feet?
+Patient: Some tingling in my toes, yes. And I feel very tired by afternoon.
+Doctor: Okay. I'm going to increase your Metformin to 1000mg twice daily. I also want to add a blood sugar monitoring log. Please avoid sweets and white rice. Let's do an HbA1c test today. Come back in 2 weeks.

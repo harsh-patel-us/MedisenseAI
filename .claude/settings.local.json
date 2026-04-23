@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(sed -i \"s/^import React from 'react';\\\\r*$//\" components/doctor/AudioRecorder.tsx components/patient/DietExercisePlan.tsx components/patient/PrecautionsList.tsx components/patient/ReportSummary.tsx components/patient/SpecialistGuide.tsx)",
+      "Bash(sed -i \"s/^import React, { useEffect, useRef } from 'react';\\\\r*$/import { useEffect, useRef } from 'react';/\" components/doctor/LiveTranscript.tsx)",
+      "Bash(sed -i \"s/^import React, { useState } from 'react';\\\\r*$/import { useState } from 'react';/\" components/doctor/SoapNoteEditor.tsx pages/PatientDashboard.tsx pages/DoctorDashboard.tsx)",
+      "Bash(sed -i \"s/^import React from 'react';\\\\r*$//\" App.tsx)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

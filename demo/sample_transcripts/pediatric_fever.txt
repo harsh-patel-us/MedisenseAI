@@ -1,0 +1,9 @@
+Doctor: Hi there, mom. What's going on with the little one?
+Patient (Mother): Doctor, he's had a fever since last night. It was 102°F this morning.
+Doctor: Is he eating and drinking normally?
+Patient (Mother): Not really. He's not eating much and he's very cranky.
+Doctor: Any cough or cold?
+Patient (Mother): A little runny nose. And he vomited once earlier.
+Doctor: How old is he?
+Patient (Mother): He's 3 years old.
+Doctor: Let me examine him. Throat looks a bit red. I can hear some mild congestion. I think it's a viral upper respiratory infection. I'll prescribe paracetamol syrup for fever. Give him plenty of fluids and rest. If the fever doesn't go down in 3 days or he has difficulty breathing, bring him back immediately.
