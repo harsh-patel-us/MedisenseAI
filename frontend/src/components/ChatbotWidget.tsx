@@ -46,12 +46,26 @@ function isEmergency(text: string): boolean {
   return EMERGENCY_KEYWORDS.some((kw) => t.includes(kw));
 }
 
-function ChatBubbleIcon() {
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+/* Internal state holds timestamps; we strip them before sending to the API. */
+interface TimedMessage extends ChatMessage {
+  timestamp: number;
+}
+
+/* ── Icons ──────────────────────────────────────────────────────────── */
+
+function ChatBubbleIcon({ size = 26 }: { size?: number }) {
   return (
     <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="26"
-      height="26"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -65,12 +79,11 @@ function ChatBubbleIcon() {
   );
 }
 
-function CloseIcon() {
+function CloseIcon({ size = 20 }: { size?: number }) {
   return (
     <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -85,15 +98,73 @@ function CloseIcon() {
   );
 }
 
+function SendArrowIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <polyline points="5 11 12 4 19 11" />
+    </svg>
+  );
+}
+
+function PaperclipIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+function BotAvatar({ size = 28 }: { size?: number }) {
+  return (
+    <div
+      className="flex shrink-0 items-center justify-center rounded-full font-semibold text-white"
+      style={{
+        width: size,
+        height: size,
+        background: PRIMARY,
+        fontSize: size === 40 ? 15 : 12,
+        boxShadow: '0 1px 3px rgba(15, 110, 86, 0.25)',
+      }}
+      aria-hidden="true"
+    >
+      {size === 40 ? 'MA' : 'M'}
+    </div>
+  );
+}
+
 function TypingDots() {
   return (
-    <div className="flex items-center gap-1 px-3 py-2" aria-label="Assistant is typing">
+    <div className="flex items-center" style={{ gap: 4 }} aria-label="Assistant is typing">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="inline-block h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500"
+          className="medibot-dot"
           style={{
-            animation: 'medibot-bounce 1s infinite ease-in-out',
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: PRIMARY,
             animationDelay: `${i * 0.15}s`,
           }}
         />
@@ -102,11 +173,13 @@ function TypingDots() {
   );
 }
 
+/* ── Widget ─────────────────────────────────────────────────────────── */
+
 export default function ChatbotWidget() {
   const [open, setOpen] = useState(false);
-  const [hasOpened, setHasOpened] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: WELCOME_MESSAGE },
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const [messages, setMessages] = useState<TimedMessage[]>(() => [
+    { role: 'assistant', content: WELCOME_MESSAGE, timestamp: Date.now() },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -117,7 +190,7 @@ export default function ChatbotWidget() {
   });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const conversationStarted = useMemo(
@@ -125,25 +198,29 @@ export default function ChatbotWidget() {
     [messages],
   );
 
-  // Auto-scroll to the latest message whenever the transcript or typing state changes.
+  // Auto-scroll on every transcript / typing update.
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading, open]);
 
-  // Focus the input when the popup opens.
+  // Focus the textarea when the popup opens.
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
 
+  // Auto-grow the textarea.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 96) + 'px';
+  }, [input]);
+
   const toggleOpen = useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev;
-      if (next) setHasOpened(true);
-      return next;
-    });
+    setOpen((prev) => !prev);
+    setHasInteracted(true);
   }, []);
 
   const send = useCallback(
@@ -154,14 +231,14 @@ export default function ChatbotWidget() {
       setError(null);
       setInput('');
 
-      const userMsg: ChatMessage = { role: 'user', content: trimmed };
+      const userMsg: TimedMessage = { role: 'user', content: trimmed, timestamp: Date.now() };
 
       // Emergency shortcut — bypass the API entirely.
       if (isEmergency(trimmed)) {
         setMessages((prev) => [
           ...prev,
           userMsg,
-          { role: 'assistant', content: EMERGENCY_REPLY },
+          { role: 'assistant', content: EMERGENCY_REPLY, timestamp: Date.now() },
         ]);
         return;
       }
@@ -170,14 +247,15 @@ export default function ChatbotWidget() {
       setMessages(nextHistory);
       setLoading(true);
 
-      // Cancel any in-flight request before issuing a new one.
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
+        // Strip timestamps — the API only takes {role, content}.
+        const apiHistory: ChatMessage[] = nextHistory.map(({ role, content }) => ({ role, content }));
         const { reply, session_id } = await sendChatbotMessage(
-          nextHistory,
+          apiHistory,
           sessionId,
           controller.signal,
         );
@@ -189,7 +267,10 @@ export default function ChatbotWidget() {
             // sessionStorage may be unavailable (private mode); harmless to skip.
           }
         }
-        setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: reply, timestamp: Date.now() },
+        ]);
       } catch (err: unknown) {
         if (controller.signal.aborted) return;
         console.error('Chatbot send failed:', err);
@@ -206,69 +287,158 @@ export default function ChatbotWidget() {
     void send(input);
   };
 
-  const showUnreadDot = !hasOpened;
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void send(input);
+    }
+  };
+
+  const canSend = !!input.trim() && !loading;
+
+  /* ── Group messages by speaker so we render avatars + timestamps per group ── */
+  type Group = { role: 'user' | 'assistant'; messages: TimedMessage[]; lastTimestamp: number };
+  const groups: Group[] = useMemo(() => {
+    const out: Group[] = [];
+    for (const m of messages) {
+      const last = out[out.length - 1];
+      if (last && last.role === m.role) {
+        last.messages.push(m);
+        last.lastTimestamp = m.timestamp;
+      } else {
+        out.push({ role: m.role, messages: [m], lastTimestamp: m.timestamp });
+      }
+    }
+    return out;
+  }, [messages]);
 
   return (
     <>
-      {/* Animations + scrollbar polish (kept local to the widget). */}
       <style>{`
-        @keyframes medibot-bounce {
-          0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
-          40% { transform: translateY(-4px); opacity: 1; }
+        /* ── Animations ─────────────────────────────────────── */
+        @keyframes medibot-window-in {
+          from { opacity: 0; transform: translateY(20px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        @keyframes medibot-pop {
-          0% { opacity: 0; transform: translateY(8px) scale(0.96); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
+        @keyframes medibot-window-out {
+          from { opacity: 1; transform: translateY(0); }
+          to   { opacity: 0; transform: translateY(20px); }
         }
-        .medibot-pop { animation: medibot-pop 0.18s ease-out; }
-        .medibot-scroll::-webkit-scrollbar { width: 6px; }
-        .medibot-scroll::-webkit-scrollbar-thumb {
-          background: rgba(100, 116, 139, 0.35); border-radius: 3px;
+        @keyframes medibot-msg-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes medibot-dot-bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+          40%           { transform: translateY(-5px); opacity: 1; }
+        }
+        @keyframes medibot-fab-pulse {
+          0%, 100% { transform: scale(1); }
+          50%      { transform: scale(1.12); }
+        }
+        @keyframes medibot-online-pulse {
+          0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+          70%  { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+        }
+
+        .medibot-window-open  { animation: medibot-window-in 0.25s ease-out forwards; }
+        .medibot-window-close { animation: medibot-window-out 0.2s ease-in forwards; }
+
+        .medibot-bubble { animation: medibot-msg-in 0.2s ease-out; }
+        .medibot-dot {
+          display: inline-block;
+          animation: medibot-dot-bounce 1s infinite ease-in-out;
+        }
+        .medibot-fab-pulse { animation: medibot-fab-pulse 2s ease-in-out infinite; }
+        .medibot-online    { animation: medibot-online-pulse 1.8s ease-out infinite; }
+
+        /* Hide scrollbars in the messages list. */
+        .medibot-scroll {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .medibot-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+        .medibot-textarea { resize: none; }
+        .medibot-textarea::placeholder { color: #aaa; }
+
+        /* ── Mobile fullscreen takeover ─────────────────────── */
+        @media (max-width: 419px) {
+          .medibot-window {
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+            border-radius: 0 !important;
+          }
+          .medibot-window-header {
+            border-radius: 0 !important;
+            padding-top: calc(14px + env(safe-area-inset-top, 0px)) !important;
+          }
         }
       `}</style>
 
-      {/* ── Popup ─────────────────────────────────────────────────────── */}
-      {open && (
+      {/* ── Popup ─────────────────────────────────────────────────── */}
+      {(open || hasInteracted) && (
         <div
           role="dialog"
           aria-label="MediSense AI chat"
-          className="medibot-pop fixed z-[1000] flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          aria-hidden={!open}
+          className={`medibot-window fixed z-[1000] flex flex-col overflow-hidden ${open ? 'medibot-window-open' : 'medibot-window-close'}`}
           style={{
-            bottom: 96,
+            bottom: 100,
             right: 24,
-            width: 'min(360px, calc(100vw - 32px))',
-            height: 'min(520px, calc(100vh - 140px))',
+            width: 370,
+            height: 580,
+            borderRadius: 20,
+            background: 'linear-gradient(160deg, #e8f8f2 0%, #ffffff 60%)',
+            boxShadow: '0 8px 40px rgba(0,0,0,0.14)',
+            pointerEvents: open ? 'auto' : 'none',
           }}
         >
           {/* Header */}
           <div
-            className="flex items-center justify-between px-4 py-3 text-white"
-            style={{ background: PRIMARY_DARK }}
+            className="medibot-window-header flex items-center justify-between text-white"
+            style={{
+              height: 64,
+              padding: '14px 16px',
+              background: PRIMARY_DARK,
+              borderRadius: '20px 20px 0 0',
+              flexShrink: 0,
+            }}
           >
-            <div className="flex items-center gap-3">
-              <div
-                className="flex h-9 w-9 items-center justify-center rounded-full"
-                style={{ background: PRIMARY }}
-              >
-                <ChatBubbleIcon />
-              </div>
+            <div className="flex items-center" style={{ gap: 12 }}>
+              <BotAvatar size={40} />
               <div className="leading-tight">
-                <div className="flex items-center gap-2 text-sm font-semibold">
+                <div
+                  className="flex items-center"
+                  style={{ fontSize: 15, fontWeight: 500, gap: 8 }}
+                >
                   MediSense AI
+                </div>
+                <div
+                  className="flex items-center"
+                  style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', gap: 6, marginTop: 2 }}
+                >
                   <span
-                    className="inline-block h-2 w-2 rounded-full bg-emerald-400"
-                    style={{ boxShadow: '0 0 6px #34d399' }}
+                    className="medibot-online inline-block rounded-full"
+                    style={{ width: 8, height: 8, background: '#4ade80' }}
                     aria-label="Online"
                   />
+                  Health Assistant · Online
                 </div>
-                <div className="text-[11px] text-white/80">Health assistant</div>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Close chat"
-              className="rounded-md p-1 text-white/90 transition hover:bg-white/10 hover:text-white"
+              className="rounded-lg text-white/90 transition hover:bg-white/15 hover:text-white"
+              style={{ padding: 6 }}
             >
               <CloseIcon />
             </button>
@@ -277,54 +447,141 @@ export default function ChatbotWidget() {
           {/* Messages */}
           <div
             ref={scrollRef}
-            className="medibot-scroll flex-1 overflow-y-auto bg-slate-50 px-3 py-3 dark:bg-slate-950"
+            className="medibot-scroll flex-1 overflow-y-auto"
+            style={{ padding: '16px 14px', background: 'transparent' }}
           >
-            <div className="flex flex-col gap-2">
-              {messages.map((m, i) => {
-                const isUser = m.role === 'user';
+            <div className="flex flex-col" style={{ gap: 10 }}>
+              {groups.map((group, gi) => {
+                const isUser = group.role === 'user';
                 return (
-                  <div
-                    key={i}
-                    className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}
-                  >
+                  <div key={gi} className="flex flex-col" style={{ gap: 4 }}>
+                    {group.messages.map((m, mi) => {
+                      const isFirstInGroup = mi === 0;
+                      return (
+                        <div
+                          key={mi}
+                          className={`flex w-full items-end ${isUser ? 'justify-end' : 'justify-start'}`}
+                          style={{ gap: 8 }}
+                        >
+                          {!isUser && (
+                            <div style={{ width: 28, flexShrink: 0 }}>
+                              {isFirstInGroup && <BotAvatar size={28} />}
+                            </div>
+                          )}
+                          <div
+                            className="medibot-bubble whitespace-pre-wrap break-words"
+                            style={{
+                              maxWidth: '78%',
+                              padding: '10px 14px',
+                              fontSize: 13,
+                              lineHeight: 1.6,
+                              background: isUser ? PRIMARY : '#ffffff',
+                              color: isUser ? '#ffffff' : '#1a1a18',
+                              borderRadius: isUser
+                                ? '16px 16px 4px 16px'
+                                : '16px 16px 16px 4px',
+                              boxShadow: isUser
+                                ? '0 1px 3px rgba(29,158,117,0.25)'
+                                : '0 1px 4px rgba(0,0,0,0.08)',
+                            }}
+                          >
+                            {m.content}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Group timestamp */}
                     <div
-                      className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed shadow-sm ${
-                        isUser
-                          ? 'rounded-br-sm text-white'
-                          : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                      }`}
-                      style={isUser ? { background: PRIMARY } : undefined}
+                      className="text-center"
+                      style={{
+                        fontSize: 10,
+                        color: '#aaa',
+                        marginTop: 2,
+                        marginLeft: isUser ? 0 : 36,
+                        marginRight: isUser ? 4 : 0,
+                        textAlign: isUser ? 'right' : 'left',
+                      }}
                     >
-                      {m.content}
+                      {formatTime(group.lastTimestamp)}
                     </div>
                   </div>
                 );
               })}
 
               {loading && (
-                <div className="flex w-full justify-start">
-                  <div className="rounded-2xl rounded-bl-sm border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <div className="flex w-full items-end justify-start" style={{ gap: 8 }}>
+                  <div style={{ width: 28, flexShrink: 0 }}>
+                    <BotAvatar size={28} />
+                  </div>
+                  <div
+                    className="medibot-bubble"
+                    style={{
+                      padding: '10px 14px',
+                      background: '#ffffff',
+                      borderRadius: '16px 16px 16px 4px',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                    }}
+                  >
                     <TypingDots />
                   </div>
                 </div>
               )}
 
               {error && (
-                <div className="self-center rounded-md bg-red-50 px-3 py-1.5 text-[12px] text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                <div
+                  className="self-center"
+                  style={{
+                    fontSize: 12,
+                    color: '#b91c1c',
+                    background: 'rgba(254, 226, 226, 0.85)',
+                    padding: '6px 12px',
+                    borderRadius: 12,
+                  }}
+                >
                   {error}
                 </div>
               )}
             </div>
 
-            {/* Quick chips — only before the user has sent anything. */}
+            {/* Quick chips — horizontal scroll, only at conversation start. */}
             {!conversationStarted && !loading && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div
+                className="medibot-scroll"
+                style={{
+                  marginTop: 14,
+                  display: 'flex',
+                  gap: 8,
+                  overflowX: 'auto',
+                  paddingBottom: 4,
+                  marginLeft: 36,
+                }}
+              >
                 {QUICK_CHIPS.map((q) => (
                   <button
                     key={q}
                     type="button"
                     onClick={() => void send(q)}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[12px] font-medium text-slate-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-400 dark:hover:text-emerald-300"
+                    style={{
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      background: '#ffffff',
+                      color: PRIMARY,
+                      border: `0.5px solid ${PRIMARY}`,
+                      borderRadius: 20,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'background 0.15s, color 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = PRIMARY;
+                      e.currentTarget.style.color = '#ffffff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#ffffff';
+                      e.currentTarget.style.color = PRIMARY;
+                    }}
                   >
                     {q}
                   </button>
@@ -333,73 +590,188 @@ export default function ChatbotWidget() {
             )}
           </div>
 
-          {/* Disclaimer */}
-          <div className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-center text-[10.5px] leading-snug text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+          {/* Disclaimer bar */}
+          <div
+            className="text-center"
+            style={{
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              color: '#888',
+              background: 'rgba(255,255,255,0.7)',
+              backdropFilter: 'blur(4px)',
+              WebkitBackdropFilter: 'blur(4px)',
+              borderTop: '0.5px solid rgba(0,0,0,0.06)',
+              flexShrink: 0,
+            }}
+          >
             AI responses are for guidance only. Always consult a licensed doctor.
           </div>
 
-          {/* Composer */}
+          {/* Input area */}
           <form
             onSubmit={handleSubmit}
-            className="flex items-center gap-2 border-t border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900"
+            style={{
+              background: '#ffffff',
+              padding: '12px 14px',
+              borderTop: '0.5px solid rgba(0,0,0,0.08)',
+              borderRadius: '0 0 20px 20px',
+              flexShrink: 0,
+            }}
           >
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
-              placeholder={loading ? 'Waiting for reply…' : 'Ask about MediSense or health…'}
-              maxLength={2000}
-              className="flex-1 rounded-full border border-slate-300 bg-white px-3.5 py-2 text-[13.5px] text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
-              aria-label="Type your message"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              aria-label="Send message"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ background: PRIMARY }}
+            <div
+              className="medibot-input-wrap"
+              style={{
+                position: 'relative',
+                background: '#f4f4f2',
+                borderRadius: 24,
+                transition: 'box-shadow 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.boxShadow = '0 0 0 2px rgba(29,158,117,0.25)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={loading}
+                rows={1}
+                placeholder="Ask a health question..."
+                maxLength={2000}
+                className="medibot-textarea"
+                aria-label="Ask a health question"
+                style={{
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  padding: '10px 84px 10px 16px',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  color: '#1a1a18',
+                  fontFamily: 'inherit',
+                  display: 'block',
+                  minHeight: 38,
+                  maxHeight: 96,
+                }}
+              />
+              {/* Attachment (decorative) */}
+              <button
+                type="button"
+                aria-label="Attach (coming soon)"
+                disabled
+                style={{
+                  position: 'absolute',
+                  right: 48,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#aaa',
+                  cursor: 'not-allowed',
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                tabIndex={-1}
               >
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
+                <PaperclipIcon size={18} />
+              </button>
+              {/* Send button (inside the field) */}
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label="Send message"
+                style={{
+                  position: 'absolute',
+                  right: 6,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 34,
+                  height: 34,
+                  borderRadius: '50%',
+                  background: PRIMARY,
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: canSend ? 'pointer' : 'not-allowed',
+                  opacity: canSend ? 1 : 0.4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'transform 0.1s, opacity 0.15s',
+                }}
+                onMouseDown={(e) => {
+                  if (canSend) e.currentTarget.style.transform = 'translateY(-50%) scale(0.92)';
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                }}
+              >
+                <SendArrowIcon size={16} />
+              </button>
+            </div>
           </form>
         </div>
       )}
 
-      {/* ── Floating bubble button ────────────────────────────────────── */}
+      {/* ── Floating bubble button ────────────────────────────────── */}
       <button
         type="button"
         onClick={toggleOpen}
         aria-label={open ? 'Close chat' : 'Open chat'}
         aria-expanded={open}
-        className="fixed z-[1000] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ring-4 ring-white/10 transition hover:scale-105 active:scale-95"
+        className={!hasInteracted ? 'medibot-fab-pulse' : ''}
         style={{
+          position: 'fixed',
           bottom: 24,
           right: 24,
+          width: 60,
+          height: 60,
+          borderRadius: '50%',
           background: PRIMARY,
-          boxShadow: '0 10px 30px rgba(15, 110, 86, 0.45)',
+          color: '#ffffff',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 20px rgba(29,158,117,0.35)',
+          transition: 'transform 0.2s ease',
+          zIndex: 1000,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.08)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
         }}
       >
-        {open ? <CloseIcon /> : <ChatBubbleIcon />}
-        {showUnreadDot && !open && (
+        {open ? <CloseIcon size={22} /> : <ChatBubbleIcon size={26} />}
+        {!hasInteracted && !open && (
           <span
-            className="absolute h-3 w-3 rounded-full border-2 border-white bg-red-500"
-            style={{ top: 8, right: 8 }}
             aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: '#4ade80',
+              border: '2px solid #ffffff',
+              boxShadow: '0 0 4px rgba(74,222,128,0.7)',
+            }}
           />
         )}
       </button>
