@@ -26,6 +26,10 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      '/chatbot': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       '/health': 'http://localhost:8000',
     },
   },

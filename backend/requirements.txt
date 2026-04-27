@@ -8,6 +8,7 @@ python-multipart>=0.0.9
 
 # ── AI / LLM ───────────────────────────────────────────────────────────────
 openai>=1.30.0                # OpenRouter is OpenAI-compatible
+openai-agents>=0.12.0         # Multi-agent orchestration for the chatbot widget
 anthropic>=0.25.0             # Optional: direct Anthropic client
 
 # ── Settings & env ─────────────────────────────────────────────────────────

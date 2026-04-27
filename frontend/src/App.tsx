@@ -12,6 +12,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
+import ChatbotWidget from './components/ChatbotWidget';
 import UseCasesPage from './pages/UseCasesPage';
 import FeaturesPage from './pages/FeaturesPage';
 import PricingPage from './pages/PricingPage';
@@ -1246,6 +1247,7 @@ export default function App() {
           />
         </Routes>
         <Footer />
+        <ChatbotWidget />
       </Router>
     </AuthProvider>
   );
