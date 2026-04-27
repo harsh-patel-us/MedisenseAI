@@ -32,16 +32,16 @@ function Navbar() {
   const navLinks = user
     ? []
     : [
-        { to: '/', label: 'Home' },
-        { to: '/features', label: 'Features' },
-        { to: '/use-cases', label: 'Use Cases' },
-        { to: '/integrations', label: 'Integrations' },
-        { to: '/pricing', label: 'Pricing' },
-        { to: '/resources', label: 'Resources' },
-        { to: '/security', label: 'Trust' },
-        { to: '/about', label: 'About' },
-        { to: '/contact', label: 'Contact' },
-      ];
+      { to: '/', label: 'Home' },
+      { to: '/features', label: 'Features' },
+      { to: '/use-cases', label: 'Use Cases' },
+      { to: '/integrations', label: 'Integrations' },
+      { to: '/pricing', label: 'Pricing' },
+      { to: '/resources', label: 'Resources' },
+      { to: '/security', label: 'Trust' },
+      { to: '/about', label: 'About' },
+      { to: '/contact', label: 'Contact' },
+    ];
 
   const handleLogout = () => {
     logout();
@@ -1046,34 +1046,34 @@ function Footer() {
   const platformLinks = user
     ? user.role === 'doctor'
       ? [
-          { to: '/doctor', label: 'Doctor Dashboard' },
-          { to: '/consultation/schedule', label: 'Schedule a Call' },
-          { to: '/consultation/join', label: 'Join a Call' },
-        ]
-      : [
-          { to: '/patient', label: 'Patient Dashboard' },
-          { to: '/consultation/join', label: 'Join a Call' },
-        ]
-    : [
-        { to: '/doctor', label: 'Doctor Portal' },
-        { to: '/patient', label: 'Patient Portal' },
+        { to: '/doctor', label: 'Doctor Dashboard' },
         { to: '/consultation/schedule', label: 'Schedule a Call' },
         { to: '/consultation/join', label: 'Join a Call' },
-      ];
+      ]
+      : [
+        { to: '/patient', label: 'Patient Dashboard' },
+        { to: '/consultation/join', label: 'Join a Call' },
+      ]
+    : [
+      { to: '/doctor', label: 'Doctor Portal' },
+      { to: '/patient', label: 'Patient Portal' },
+      { to: '/consultation/schedule', label: 'Schedule a Call' },
+      { to: '/consultation/join', label: 'Join a Call' },
+    ];
 
   // Marketing links hidden from logged-in users.
   const companyLinks = user
     ? []
     : [
-        { to: '/about', label: 'About Us' },
-        { to: '/use-cases', label: 'Use Cases' },
-        { to: '/features', label: 'Features' },
-        { to: '/pricing', label: 'Pricing' },
-        { to: '/integrations', label: 'Integrations' },
-        { to: '/resources', label: 'Resources' },
-        { to: '/security', label: 'Trust Center' },
-        { to: '/contact', label: 'Contact' },
-      ];
+      { to: '/about', label: 'About Us' },
+      { to: '/use-cases', label: 'Use Cases' },
+      { to: '/features', label: 'Features' },
+      { to: '/pricing', label: 'Pricing' },
+      { to: '/integrations', label: 'Integrations' },
+      { to: '/resources', label: 'Resources' },
+      { to: '/security', label: 'Trust Center' },
+      { to: '/contact', label: 'Contact' },
+    ];
 
   return (
     <footer style={{
@@ -1145,8 +1145,8 @@ function Footer() {
                     textDecoration: 'none', color: 'var(--text-secondary)',
                     fontSize: '0.85rem', transition: 'color 0.2s',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.color = 'var(--brand-teal)')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
+                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--brand-teal)')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
                   >
                     {link.label}
                   </Link>
@@ -1166,7 +1166,7 @@ function Footer() {
             © {year} MediSense AI. All rights reserved.
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', maxWidth: 560, textAlign: 'right' }}>
-            For educational and demonstration purposes. Always consult a qualified healthcare professional for medical decisions.
+            Crafted Mindfully at Logicwind
           </p>
         </div>
       </div>
