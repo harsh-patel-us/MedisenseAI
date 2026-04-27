@@ -5,12 +5,13 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export async function sendChatbotMessage(
   messages: ChatMessage[],
+  sessionId: string | null,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ChatResponse> {
   const { data } = await axios.post<ChatResponse>(
     `${API_BASE}/chatbot/message`,
-    { messages },
+    { messages, session_id: sessionId },
     { timeout: 30000, signal },
   );
-  return data.reply;
+  return data;
 }

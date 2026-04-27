@@ -7,8 +7,10 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   messages: ChatMessage[];
+  session_id?: string | null;
 }
 
 export interface ChatResponse {
+  session_id: string;
   reply: string;
 }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sendChatbotMessage } from '../api/chatbotApi';
 import type { ChatMessage } from '../types/chatbot.types';
 
+const SESSION_STORAGE_KEY = 'medisense_chatbot_session_id';
+
 const WELCOME_MESSAGE =
   "Hi! I'm the MediSense AI assistant. I can help you understand our platform and answer general health questions. For medical decisions, always consult a qualified doctor.";
 
@@ -109,6 +111,10 @@ export default function ChatbotWidget() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+  });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -170,7 +176,19 @@ export default function ChatbotWidget() {
       abortRef.current = controller;
 
       try {
-        const reply = await sendChatbotMessage(nextHistory, controller.signal);
+        const { reply, session_id } = await sendChatbotMessage(
+          nextHistory,
+          sessionId,
+          controller.signal,
+        );
+        if (session_id && session_id !== sessionId) {
+          setSessionId(session_id);
+          try {
+            window.sessionStorage.setItem(SESSION_STORAGE_KEY, session_id);
+          } catch {
+            // sessionStorage may be unavailable (private mode); harmless to skip.
+          }
+        }
         setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
       } catch (err: unknown) {
         if (controller.signal.aborted) return;
@@ -180,7 +198,7 @@ export default function ChatbotWidget() {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [loading, messages],
+    [loading, messages, sessionId],
   );
 
   const handleSubmit = (e: React.FormEvent) => {

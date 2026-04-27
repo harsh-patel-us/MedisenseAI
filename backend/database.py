@@ -49,6 +49,27 @@ class ConsultationSession(Base):
     status: Mapped[str] = mapped_column(String, default="in_progress")
 
 
+class ChatbotSession(Base):
+    """Persistent transcript for the website chatbot widget.
+
+    Each visitor browser keeps a session_id in sessionStorage and replays it
+    on every turn. The full conversation is stored as JSON on `messages` so
+    we don't need a per-message child table for what is essentially append-only.
+    """
+    __tablename__ = "chatbot_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    messages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list
+
+
 class PatientAnalysisRecord(Base):
     __tablename__ = "patient_analyses"
 
@@ -95,6 +116,10 @@ async def init_db():
                 ("uploaded_file_size", "INTEGER"),
                 ("generated_pdf_path", "VARCHAR"),
                 ("generated_pdf_size", "INTEGER"),
+            ],
+            "chatbot_sessions": [
+                ("user_id", "VARCHAR"),
+                ("message_count", "INTEGER DEFAULT 0"),
             ],
         }
 
