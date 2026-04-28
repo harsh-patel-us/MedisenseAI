@@ -1,0 +1,92 @@
+"""
+patient_chatbot_models.py — Pydantic schemas for the patient-side persistent
+medical chatbot ("Dr. MediSense").
+"""
+from datetime import datetime
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+ChatRole = Literal["user", "assistant"]
+AttachmentKind = Literal["image", "pdf"]
+
+
+class ChatAttachmentDTO(BaseModel):
+    """One file attached to a patient chat turn (sent base64-encoded)."""
+    filename: str = Field(..., max_length=200)
+    mime_type: str = Field(..., max_length=80)
+    # Raw base64 (no data: URI prefix). Capped to ~10 MB encoded which is
+    # roughly 7.5 MB of binary content — within max_file_size_mb.
+    data_base64: str = Field(..., max_length=14_000_000)
+    kind: AttachmentKind
+
+
+class ChatFileReference(BaseModel):
+    """Persisted descriptor of an attachment that was sent on a turn.
+    Raw bytes are NEVER persisted — only filename, type, and size."""
+    filename: str
+    mime_type: str
+    size_bytes: int
+    kind: AttachmentKind
+
+
+class PatientChatMessageDTO(BaseModel):
+    id: str
+    role: ChatRole
+    content: str
+    created_at: datetime
+    file_references: List[ChatFileReference] = Field(default_factory=list)
+
+
+class PatientChatSessionSummary(BaseModel):
+    id: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    session_summary: Optional[str] = None
+    message_count: int
+
+
+class PatientChatRequest(BaseModel):
+    """A turn from the patient.
+
+    `message` is optional — if omitted (or empty) and no attachments are
+    provided, the server treats this as a "give me my personalised welcome"
+    request, creates a new session, and returns a greeting that already
+    references the patient's history.
+    """
+    patient_id: str
+    session_id: Optional[str] = None
+    message: Optional[str] = Field(default=None, max_length=4000)
+    attachments: List[ChatAttachmentDTO] = Field(default_factory=list)
+
+
+class PatientChatResponse(BaseModel):
+    session_id: str
+    reply: str
+    is_new_session: bool
+
+
+class PatientChatHistoryResponse(BaseModel):
+    patient_id: str
+    sessions: List[PatientChatSessionSummary]
+
+
+class PatientChatSessionMessagesResponse(BaseModel):
+    session_id: str
+    patient_id: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    session_summary: Optional[str] = None
+    messages: List[PatientChatMessageDTO]
+
+
+class EndSessionRequest(BaseModel):
+    patient_id: str
+    session_id: str
+
+
+class EndSessionResponse(BaseModel):
+    session_id: str
+    ended_at: datetime
+    summary_generated: bool

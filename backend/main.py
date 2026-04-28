@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import init_db
-from routers import auth, chatbot, consultation, doctor, patient
+from routers import auth, chatbot, consultation, doctor, patient, patient_chatbot
 
 # ── Logging ───────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -60,6 +60,7 @@ app.include_router(doctor.router)
 app.include_router(patient.router)
 app.include_router(consultation.router)
 app.include_router(chatbot.router)
+app.include_router(patient_chatbot.router)
 
 
 # ── Health check ───────────────────────────────────────────────────────────

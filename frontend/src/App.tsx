@@ -13,6 +13,7 @@ import Register from './pages/Register';
 import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import ChatbotWidget from './components/ChatbotWidget';
+import PatientChat from './pages/PatientChat';
 import UseCasesPage from './pages/UseCasesPage';
 import FeaturesPage from './pages/FeaturesPage';
 import PricingPage from './pages/PricingPage';
@@ -1185,6 +1186,14 @@ function PublicOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/* ── Visitor-only wrapper for the global ChatbotWidget.
+   Doctors get no chatbot at all; patients use the dedicated /patient/chat page. */
+function VisitorOnlyChatbot() {
+  const { user, loading } = useAuth();
+  if (loading || user) return null;
+  return <ChatbotWidget />;
+}
+
 /* ── Main App ────────────────────────────────────────────────────────── */
 export default function App() {
   return (
@@ -1222,6 +1231,14 @@ export default function App() {
             }
           />
           <Route
+            path="/patient/chat"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <PatientChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/consultation/schedule"
             element={
               <ProtectedRoute allowedRoles={['doctor']}>
@@ -1247,7 +1264,7 @@ export default function App() {
           />
         </Routes>
         <Footer />
-        <ChatbotWidget />
+        <VisitorOnlyChatbot />
       </Router>
     </AuthProvider>
   );
