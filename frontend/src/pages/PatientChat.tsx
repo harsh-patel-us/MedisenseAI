@@ -477,7 +477,7 @@ export default function PatientChat() {
               MA
             </div>
             <div style={{ lineHeight: 1.2 }}>
-              <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Dr. MediSense</div>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>MediSense AI</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                 Your AI medical companion
               </div>
@@ -523,7 +523,7 @@ export default function PatientChat() {
                 lineHeight: 1.5,
               }}
             >
-              No past conversations yet. Start a new chat to ask Dr. MediSense
+              No past conversations yet. Start a new chat to ask MediSense AI
               anything about your health.
             </div>
           ) : (
@@ -644,11 +644,11 @@ export default function PatientChat() {
               Dr
             </div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>Dr. MediSense</div>
+              <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>MediSense AI</div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                 {readOnly
                   ? 'Read-only view of past conversation'
-                  : 'Online · powered by gpt-4o-mini agent'}
+                  : 'Online · powered by MediSense AI'}
               </div>
             </div>
           </div>
@@ -693,7 +693,7 @@ export default function PatientChat() {
             >
               <div style={{ fontSize: '1.6rem', marginBottom: 14 }}>👋</div>
               <h2 style={{ fontSize: '1.25rem', marginBottom: 10, color: 'var(--text-primary)' }}>
-                Hi {user?.full_name?.split(' ')[0] ?? 'there'}, I'm Dr. MediSense.
+                Hi {user?.full_name?.split(' ')[0] ?? 'there'}, I'm MediSense AI.
               </h2>
               <p style={{ fontSize: '0.92rem' }}>
                 Ask me about a symptom, a medication, or upload a recent lab
@@ -803,8 +803,8 @@ export default function PatientChat() {
               disabled={readOnly || sending}
               placeholder={
                 readOnly
-                  ? 'This conversation is read-only — start a new chat to talk to Dr. MediSense.'
-                  : 'Ask Dr. MediSense anything…'
+                  ? 'This conversation is read-only — start a new chat to talk to MediSense AI.'
+                  : 'Ask MediSense AI anything…'
               }
               rows={1}
               maxLength={4000}
@@ -849,7 +849,7 @@ export default function PatientChat() {
               textAlign: 'center',
             }}
           >
-            Dr. MediSense provides educational guidance only — always consult a
+            MediSense AI provides educational guidance only — always consult a
             licensed clinician for medical decisions.
           </div>
         </form>
@@ -945,7 +945,7 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
           </div>
         )}
         {msg.pending ? (
-          <span style={{ opacity: 0.7 }}>Dr. MediSense is thinking…</span>
+          <span style={{ opacity: 0.7 }}>MediSense AI is thinking…</span>
         ) : msg.content === '[attachment uploaded]' && refs.length > 0 ? null : (
           <span>{msg.content}</span>
         )}
