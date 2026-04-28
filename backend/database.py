@@ -109,6 +109,10 @@ class PatientChatSession(Base):
     )
     started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Short, human-readable title — auto-set from the first user turn so the
+    # sidebar can show something more meaningful than "Apr 28, 5:16 PM" before
+    # the agent has produced a summary.
+    title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     session_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     last_summary_at_count: Mapped[int] = mapped_column(Integer, default=0)

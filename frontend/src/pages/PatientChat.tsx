@@ -945,7 +945,7 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
           </div>
         )}
         {msg.pending ? (
-          <span style={{ opacity: 0.7 }}>MediSense AI is thinking…</span>
+          <ThinkingIndicator />
         ) : msg.content === '[attachment uploaded]' && refs.length > 0 ? null : (
           <span>{msg.content}</span>
         )}
@@ -1083,6 +1083,94 @@ function AttachmentPreview({
       >
         ×
       </button>
+    </div>
+  );
+}
+
+/* ── Thinking Indicator ─────────────────────────────────────────── */
+
+const THINKING_STYLE_ID = 'medisense-thinking-keyframes';
+
+function ThinkingIndicator() {
+  useEffect(() => {
+    if (document.getElementById(THINKING_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = THINKING_STYLE_ID;
+    style.textContent = `
+      @keyframes ms-thinking-bounce {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-8px); }
+      }
+      @keyframes ms-thinking-shimmer {
+        0% { background-position: -200% center; }
+        100% { background-position: 200% center; }
+      }
+      @keyframes ms-thinking-pulse {
+        0%, 100% { transform: scale(1); opacity: 0.85; }
+        50% { transform: scale(1.18); opacity: 1; }
+      }
+      @keyframes ms-thinking-fade-in {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        animation: 'ms-thinking-fade-in 0.35s ease-out both',
+      }}
+    >
+      {/* Pulsing brain icon */}
+      <span
+        style={{
+          fontSize: 20,
+          animation: 'ms-thinking-pulse 1.8s ease-in-out infinite',
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+        aria-hidden="true"
+      >
+        🧠
+      </span>
+
+      {/* Shimmer text */}
+      <span
+        style={{
+          fontSize: '0.88rem',
+          fontWeight: 600,
+          background: `linear-gradient(90deg, ${TEAL} 0%, #a5f3fc 40%, ${TEAL} 80%)`,
+          backgroundSize: '200% auto',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          animation: 'ms-thinking-shimmer 2.4s linear infinite',
+        }}
+      >
+        MediSense AI is thinking
+      </span>
+
+      {/* Bouncing dots */}
+      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: TEAL,
+              display: 'inline-block',
+              animation: `ms-thinking-bounce 1.2s ease-in-out ${i * 0.15}s infinite`,
+              boxShadow: `0 0 6px ${TEAL}`,
+            }}
+          />
+        ))}
+      </span>
     </div>
   );
 }
