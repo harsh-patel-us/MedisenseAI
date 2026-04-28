@@ -43,6 +43,7 @@ class PatientChatSessionSummary(BaseModel):
     id: str
     started_at: datetime
     ended_at: Optional[datetime] = None
+    title: Optional[str] = None
     session_summary: Optional[str] = None
     message_count: int
 

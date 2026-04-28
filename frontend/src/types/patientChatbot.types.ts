@@ -27,6 +27,7 @@ export interface PatientChatSessionSummary {
   id: string;
   started_at: string;
   ended_at: string | null;
+  title: string | null;
   session_summary: string | null;
   message_count: number;
 }

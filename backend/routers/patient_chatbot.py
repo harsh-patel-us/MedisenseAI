@@ -259,10 +259,10 @@ async def send_message(
         ).scalar_one_or_none()
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found.")
+        # Re-open the session transparently if it was previously auto-closed
+        # on leave. The patient is allowed to continue any past conversation.
         if session.ended_at is not None:
-            raise HTTPException(
-                status_code=409, detail="Session is closed. Start a new conversation."
-            )
+            session.ended_at = None
 
     if session is None:
         session = PatientChatSession(
@@ -320,6 +320,18 @@ async def send_message(
                 ),
             )
         )
+        # First-turn title: pick the first ~60 chars of the patient's text so
+        # the sidebar shows something meaningful immediately, before the
+        # background summarizer has run.
+        if not session.title:
+            seed = user_text or (
+                f"Shared {persisted_refs[0].filename}"
+                if persisted_refs
+                else ""
+            )
+            seed = " ".join(seed.split())  # collapse whitespace
+            if seed:
+                session.title = seed[:60] + ("…" if len(seed) > 60 else "")
     db.add(
         PatientChatMessage(
             id=generate_id(),
@@ -382,6 +394,7 @@ async def get_history(
                 id=s.id,
                 started_at=s.started_at,
                 ended_at=s.ended_at,
+                title=s.title,
                 session_summary=s.session_summary,
                 message_count=s.message_count or 0,
             )

@@ -99,21 +99,64 @@ function shortSummary(s: PatientChatSessionSummary): string {
 }
 
 function sessionTitle(s: PatientChatSessionSummary): string {
-  if (s.session_summary) {
-    const firstSentence = s.session_summary.split('.')[0];
-    const t = firstSentence.trim();
-    if (t.length >= 8) return t.length > 48 ? t.slice(0, 48) + '…' : t;
+  // Prefer the explicit title (auto-set from the patient's first message), so
+  // brand-new conversations show what the patient actually asked about.
+  if (s.title && s.title.trim()) {
+    const t = s.title.trim();
+    return t.length > 48 ? t.slice(0, 48) + '…' : t;
   }
-  try {
-    return new Date(s.started_at).toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return 'Conversation';
+  if (s.session_summary && s.session_summary.trim()) {
+    const firstSentence = s.session_summary.split('.')[0].trim();
+    if (firstSentence.length >= 8) {
+      return firstSentence.length > 48
+        ? firstSentence.slice(0, 48) + '…'
+        : firstSentence;
+    }
   }
+  return 'New chat';
+}
+
+/* ── Components ─────────────────────────────────────────────────────── */
+
+function BotAvatar({ size = 36 }: { size?: number }) {
+  const iconSize = Math.round(size * 0.62);
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: `linear-gradient(135deg, ${TEAL_DARK} 0%, ${TEAL} 100%)`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        boxShadow: `0 3px 14px rgba(5,174,187,0.45), 0 0 0 2px rgba(5,174,187,0.18)`,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Stethoscope SVG — inline, zero network dependency */}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={iconSize}
+        height={iconSize}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="rgba(255,255,255,0.95)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {/* ear tubes */}
+        <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3" />
+        {/* tube down */}
+        <path d="M8 15a6 6 0 0 0 6 6h0a6 6 0 0 0 6-6v-3" />
+        {/* chest piece circle */}
+        <circle cx="20" cy="10" r="2" fill="rgba(255,255,255,0.95)" stroke="none"/>
+      </svg>
+    </div>
+  );
 }
 
 /* ── Page ───────────────────────────────────────────────────────────── */
@@ -126,7 +169,6 @@ export default function PatientChat() {
   const [sessions, setSessions] = useState<PatientChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
-  const [readOnly, setReadOnly] = useState(false);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
@@ -213,9 +255,9 @@ export default function PatientChat() {
 
   const startNewChat = useCallback(async () => {
     // If the user is leaving an active live session that had real activity,
-    // close it so the next session has a fresh memory.
+    // trigger a summary refresh so its sidebar entry has fresh memory.
     const prev = activeSessionRef.current;
-    if (prev && sentSomethingRef.current && !readOnly) {
+    if (prev && sentSomethingRef.current) {
       try {
         await endPatientChatSession(patientId, prev);
       } catch {
@@ -225,27 +267,29 @@ export default function PatientChat() {
     sentSomethingRef.current = false;
     setActiveSessionId(null);
     setMessages([]);
-    setReadOnly(false);
     setError(null);
     setInput('');
     setPending([]);
     void refreshHistory();
-  }, [patientId, readOnly, refreshHistory]);
+  }, [patientId, refreshHistory]);
 
   const openSession = useCallback(
     async (s: PatientChatSessionSummary) => {
-      // Always opening a past/closed session in read-only mode.
+      // Opening a past session loads it as the active conversation. The
+      // patient can keep adding messages — the backend transparently
+      // re-opens any auto-closed session on the next send.
       const prev = activeSessionRef.current;
-      if (prev && sentSomethingRef.current && !readOnly && prev !== s.id) {
+      if (prev && sentSomethingRef.current && prev !== s.id) {
         try {
           await endPatientChatSession(patientId, prev);
         } catch {
           /* non-fatal */
         }
       }
-      sentSomethingRef.current = false;
+      // Treat the session as "live" — any further sends should trigger
+      // summary regeneration on next leave/new-chat.
+      sentSomethingRef.current = (s.message_count || 0) > 0;
       setActiveSessionId(s.id);
-      setReadOnly(true);
       setError(null);
       setSessionLoading(true);
       setMessages([]);
@@ -259,7 +303,7 @@ export default function PatientChat() {
         setSessionLoading(false);
       }
     },
-    [patientId, readOnly],
+    [patientId],
   );
 
   /* ── File handling ─────────────────────────────────────────────── */
@@ -301,7 +345,7 @@ export default function PatientChat() {
   /* ── Send ──────────────────────────────────────────────────────── */
 
   const send = useCallback(async () => {
-    if (sending || readOnly) return;
+    if (sending) return;
     const trimmed = input.trim();
     if (!trimmed && pending.length === 0) return;
 
@@ -394,14 +438,13 @@ export default function PatientChat() {
     } finally {
       setSending(false);
     }
-  }, [input, pending, patientId, readOnly, refreshHistory, sending]);
+  }, [input, pending, patientId, refreshHistory, sending]);
 
   /* ── Drag & drop ───────────────────────────────────────────────── */
   const [dragOver, setDragOver] = useState(false);
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (readOnly) return;
     addFiles(e.dataTransfer.files);
   };
 
@@ -427,7 +470,7 @@ export default function PatientChat() {
 
   /* ── Render ────────────────────────────────────────────────────── */
 
-  const canSend = !sending && !readOnly && (input.trim().length > 0 || pending.length > 0);
+  const canSend = !sending && (input.trim().length > 0 || pending.length > 0);
 
   return (
     <div
@@ -460,22 +503,7 @@ export default function PatientChat() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: '50%',
-                background: TEAL_DARK,
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                fontSize: 13,
-              }}
-            >
-              MA
-            </div>
+            <BotAvatar size={36} />
             <div style={{ lineHeight: 1.2 }}>
               <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>MediSense AI</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
@@ -609,7 +637,7 @@ export default function PatientChat() {
         }}
         onDragOver={(e) => {
           e.preventDefault();
-          if (!readOnly) setDragOver(true);
+          setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
@@ -627,40 +655,14 @@ export default function PatientChat() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '50%',
-                background: TEAL,
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                fontSize: 14,
-              }}
-            >
-              Dr
-            </div>
+            <BotAvatar size={38} />
             <div>
               <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>MediSense AI</div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                {readOnly
-                  ? 'Read-only view of past conversation'
-                  : 'Online · powered by MediSense AI'}
+                Online · powered by MediSense AI
               </div>
             </div>
           </div>
-          {readOnly && (
-            <button
-              className="btn-secondary"
-              onClick={startNewChat}
-              style={{ fontSize: '0.82rem', padding: '8px 14px' }}
-            >
-              Start New Chat
-            </button>
-          )}
         </header>
 
         {/* Messages area */}
@@ -681,7 +683,7 @@ export default function PatientChat() {
             </div>
           )}
 
-          {!sessionLoading && messages.length === 0 && !readOnly && (
+          {!sessionLoading && messages.length === 0 && (
             <div
               style={{
                 margin: 'auto',
@@ -727,7 +729,7 @@ export default function PatientChat() {
         )}
 
         {/* Pending attachments preview */}
-        {pending.length > 0 && !readOnly && (
+        {pending.length > 0 && (
           <div
             style={{
               padding: '8px 24px 0',
@@ -769,14 +771,14 @@ export default function PatientChat() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={readOnly || sending}
+              disabled={sending}
               title="Attach JPG, PNG, or PDF"
               aria-label="Attach file"
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: readOnly ? 'var(--text-muted)' : 'var(--text-secondary)',
-                cursor: readOnly ? 'not-allowed' : 'pointer',
+                color: 'var(--text-secondary)',
+                cursor: sending ? 'not-allowed' : 'pointer',
                 padding: 8,
                 fontSize: 18,
                 lineHeight: 1,
@@ -800,12 +802,8 @@ export default function PatientChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={readOnly || sending}
-              placeholder={
-                readOnly
-                  ? 'This conversation is read-only — start a new chat to talk to MediSense AI.'
-                  : 'Ask MediSense AI anything…'
-              }
+              disabled={sending}
+              placeholder="Ask MediSense AI anything…"
               rows={1}
               maxLength={4000}
               style={{
@@ -855,7 +853,7 @@ export default function PatientChat() {
         </form>
 
         {/* Drag overlay */}
-        {dragOver && !readOnly && (
+        {dragOver && (
           <div
             style={{
               position: 'absolute',
@@ -897,25 +895,7 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
         gap: 10,
       }}
     >
-      {!isUser && (
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: '50%',
-            background: TEAL_DARK,
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 12,
-            fontWeight: 700,
-            flexShrink: 0,
-          }}
-        >
-          Dr
-        </div>
-      )}
+      {!isUser && <BotAvatar size={34} />}
       <div
         style={{
           maxWidth: '70%',

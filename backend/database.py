@@ -196,6 +196,9 @@ async def init_db():
             "patient_chat_messages": [
                 ("file_references", "TEXT"),
             ],
+            "patient_chat_sessions": [
+                ("title", "VARCHAR"),
+            ],
         }
 
         for table, cols in new_columns.items():
