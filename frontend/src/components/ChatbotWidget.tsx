@@ -136,19 +136,41 @@ function PaperclipIcon({ size = 18 }: { size?: number }) {
 }
 
 function BotAvatar({ size = 28 }: { size?: number }) {
+  const iconSize = Math.round(size * 0.6);
   return (
     <div
-      className="flex shrink-0 items-center justify-center rounded-full font-semibold text-white"
       style={{
         width: size,
         height: size,
-        background: PRIMARY,
-        fontSize: size === 40 ? 15 : 12,
-        boxShadow: '0 1px 3px rgba(15, 110, 86, 0.25)',
+        borderRadius: '50%',
+        background: `linear-gradient(135deg, ${PRIMARY_DARK} 0%, ${PRIMARY} 100%)`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        boxShadow: `0 3px 12px rgba(29,158,117,0.4), 0 0 0 2px rgba(29,158,117,0.15)`,
+        overflow: 'hidden',
       }}
       aria-hidden="true"
     >
-      {size === 40 ? 'MA' : 'M'}
+      {/* Heart-pulse / vitals line — medical AI assistant icon */}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={iconSize}
+        height={iconSize}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="rgba(255,255,255,0.95)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {/* Heart shape */}
+        <path d="M19.5 12.572l-7.5 7.428l-7.5-7.428A5 5 0 1 1 12 6.006a5 5 0 1 1 7.5 6.572" />
+        {/* Pulse/heartbeat line across the heart */}
+        <polyline points="2 12 6 12 8 9 11 15 13 12 22 12" stroke="rgba(255,255,255,0.95)" fill="none" />
+      </svg>
     </div>
   );
 }
