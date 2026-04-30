@@ -20,6 +20,7 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
   { to: '/patient', label: 'Upload Report', icon: '🧾' },
   { to: '/patient/chat', label: 'Chat with MediSense', icon: '💬' },
+  { to: '/consultation/schedule', label: 'Schedule a Call', icon: '📅' },
 ];
 
 function PatientSidebar() {

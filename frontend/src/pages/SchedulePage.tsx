@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listScheduledMeetings, scheduleConsultation } from '../api/consultationApi';
+import { useAuth } from '../contexts/AuthContext';
 import type { ScheduledMeeting } from '../types/consultation.types';
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -117,6 +118,8 @@ const inputStyle: React.CSSProperties = {
 
 export default function SchedulePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDoctor = user?.role === 'doctor';
 
   // Default scheduled_at = next round half-hour
   const defaultStart = (() => {
@@ -125,14 +128,14 @@ export default function SchedulePage() {
     return toLocalDateTimeInput(d);
   })();
 
-  const [form, setForm] = useState({
-    doctor_name: '',
-    patient_name: '',
+  const [form, setForm] = useState(() => ({
+    doctor_name: isDoctor ? user?.full_name ?? '' : '',
+    patient_name: isDoctor ? '' : user?.full_name ?? '',
     patient_email: '',
     reason: '',
     scheduled_at_local: defaultStart,
     duration_minutes: 30,
-  });
+  }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [created, setCreated] = useState<ScheduledMeeting | null>(null);
@@ -178,10 +181,15 @@ export default function SchedulePage() {
 
     setLoading(true);
     try {
+      const enteredEmail = form.patient_email.trim() || undefined;
+      // The "Patient Email" field always carries the OTHER party's email —
+      // for the doctor flow that's the patient, for the patient flow it's
+      // the doctor. The backend treats this address as the Calendar attendee.
       const meeting = await scheduleConsultation({
         doctor_name: form.doctor_name.trim(),
         patient_name: form.patient_name.trim(),
-        patient_email: form.patient_email.trim() || undefined,
+        patient_email: isDoctor ? enteredEmail : undefined,
+        doctor_email: isDoctor ? undefined : enteredEmail,
         scheduled_at: new Date(form.scheduled_at_local).toISOString(),
         duration_minutes: form.duration_minutes,
         reason: form.reason.trim(),
@@ -208,7 +216,7 @@ export default function SchedulePage() {
   function resetForm() {
     setCreated(null);
     setCopyOk(false);
-    setForm(f => ({ ...f, reason: '', scheduled_at_local: defaultStart }));
+    setForm(f => ({ ...f, reason: '', scheduled_at_local: defaultStart, patient_email: '' }));
   }
 
   return (
@@ -299,7 +307,7 @@ export default function SchedulePage() {
                     onBlur={e => (e.target.style.borderColor = 'var(--border-subtle)')}
                   />
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    Used to pre-fill the invitation email after scheduling.
+                    Used for the Google Calendar invite + Meet link sent on schedule.
                   </p>
                 </div>
 
@@ -525,6 +533,9 @@ function SuccessPanel({
         </div>
       </div>
 
+      {/* Google Meet / Calendar invite status */}
+      <GoogleInviteSummary meeting={meeting} />
+
       {/* Action buttons */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         <button
@@ -641,6 +652,18 @@ function UpcomingCard({ meeting }: { meeting: ScheduledMeeting }) {
         >
           🧬 Join as Patient
         </button>
+        {meeting.meet_link && (
+          <a
+            href={meeting.meet_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: 'none' }}
+          >
+            <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}>
+              📹 Google Meet
+            </button>
+          </a>
+        )}
         <button
           onClick={copy}
           className="btn-secondary"
@@ -657,4 +680,84 @@ function UpcomingCard({ meeting }: { meeting: ScheduledMeeting }) {
       </div>
     </div>
   );
+}
+
+/* ── Google Meet invite status (shown after scheduling) ──────────────── */
+
+function GoogleInviteSummary({ meeting }: { meeting: ScheduledMeeting }) {
+  if (meeting.google_invite_status === 'sent' && meeting.meet_link) {
+    return (
+      <div
+        style={{
+          padding: '14px 16px',
+          borderRadius: 12,
+          background: 'rgba(74,222,128,0.08)',
+          border: '1px solid rgba(74,222,128,0.3)',
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4ade80', marginBottom: 8 }}>
+          ✅ Google Calendar invite sent
+        </div>
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 10 }}>
+          Both parties just got an email from Google with the event and Meet link.
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <a
+            href={meeting.meet_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: 'none', flex: '1 1 auto' }}
+          >
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ width: '100%', justifyContent: 'center', padding: '10px', fontSize: '0.85rem' }}
+            >
+              📹 Join Google Meet
+            </button>
+          </a>
+          {meeting.google_event_link && (
+            <a
+              href={meeting.google_event_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'none' }}
+            >
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: '10px 14px', fontSize: '0.85rem' }}
+              >
+                📅 Open in Calendar
+              </button>
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (meeting.google_invite_status === 'failed') {
+    return (
+      <div
+        style={{
+          padding: '12px 14px',
+          borderRadius: 12,
+          background: 'rgba(245,158,11,0.08)',
+          border: '1px solid rgba(245,158,11,0.3)',
+          marginBottom: 16,
+          fontSize: '0.82rem',
+          color: '#fbbf24',
+        }}
+      >
+        ⚠️ {meeting.google_invite_error ||
+          'Google Calendar invite could not be sent. The room link below still works.'}
+      </div>
+    );
+  }
+
+  // No Calendar invite was attempted (e.g. patient_email left blank). Just
+  // show nothing — the room link below is enough.
+  return null;
 }

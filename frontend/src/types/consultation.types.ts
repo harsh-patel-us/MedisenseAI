@@ -75,10 +75,13 @@ export interface ScheduleRoomRequest {
   doctor_name: string;
   patient_name: string;
   patient_email?: string;
+  doctor_email?: string;
   scheduled_at: string;
   duration_minutes: number;
   reason: string;
 }
+
+export type GoogleInviteStatus = 'sent' | 'skipped' | 'failed';
 
 export interface ScheduledMeeting {
   room_id: string;
@@ -86,9 +89,26 @@ export interface ScheduledMeeting {
   doctor_name: string;
   patient_name: string;
   patient_email?: string | null;
+  doctor_email?: string | null;
   scheduled_at: string;
   duration_minutes: number;
   reason: string;
   status: string;
   created_at: string;
+  organizer_role?: 'doctor' | 'patient' | null;
+  meet_link?: string | null;
+  google_event_id?: string | null;
+  google_event_link?: string | null;
+  google_invite_status?: GoogleInviteStatus;
+  google_invite_error?: string | null;
+}
+
+export interface GoogleConnectionStatus {
+  connected: boolean;
+  email: string | null;
+}
+
+export interface GoogleAuthUrlResponse {
+  auth_url: string;
+  state: string;
 }

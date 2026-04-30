@@ -115,16 +115,14 @@ function Navbar() {
                 {user.role === 'doctor' ? '🩺 Dashboard' : '🧬 Dashboard'}
               </button>
             </Link>
-            {user.role === 'doctor' && (
-              <Link to="/consultation/schedule">
-                <button
-                  className={location.pathname === '/consultation/schedule' ? 'btn-primary' : 'btn-secondary'}
-                  style={{ padding: '8px 16px', fontSize: '0.82rem' }}
-                >
-                  📅 Schedule
-                </button>
-              </Link>
-            )}
+            <Link to="/consultation/schedule">
+              <button
+                className={location.pathname === '/consultation/schedule' ? 'btn-primary' : 'btn-secondary'}
+                style={{ padding: '8px 16px', fontSize: '0.82rem' }}
+              >
+                📅 Schedule
+              </button>
+            </Link>
             <Link to="/consultation/join">
               <button
                 className={location.pathname === '/consultation/join' ? 'btn-primary' : 'btn-secondary'}
@@ -216,11 +214,9 @@ function Navbar() {
                     {user.role === 'doctor' ? '🩺 Dashboard' : '🧬 Dashboard'}
                   </button>
                 </Link>
-                {user.role === 'doctor' && (
-                  <Link to="/consultation/schedule" onClick={() => setMobileOpen(false)}>
-                    <button className="btn-secondary" style={{ fontSize: '0.82rem' }}>📅 Schedule</button>
-                  </Link>
-                )}
+                <Link to="/consultation/schedule" onClick={() => setMobileOpen(false)}>
+                  <button className="btn-secondary" style={{ fontSize: '0.82rem' }}>📅 Schedule</button>
+                </Link>
                 <Link to="/consultation/join" onClick={() => setMobileOpen(false)}>
                   <button className="btn-secondary" style={{ fontSize: '0.82rem' }}>🎥 Join Call</button>
                 </Link>
@@ -1241,7 +1237,7 @@ export default function App() {
           <Route
             path="/consultation/schedule"
             element={
-              <ProtectedRoute allowedRoles={['doctor']}>
+              <ProtectedRoute>
                 <SchedulePage />
               </ProtectedRoute>
             }

@@ -28,6 +28,17 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)  # "doctor" | "patient"
 
+    # ── Google Calendar OAuth ────────────────────────────────────────────
+    # Populated when the user connects their Google account on the schedule
+    # page. Used to insert calendar events (with Google Meet links) on their
+    # behalf when they organize a consultation. Refresh token survives across
+    # access-token expiries; we only re-prompt the user if it is revoked.
+    google_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    google_access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    google_token_expiry: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    google_scopes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
 
 class ConsultationSession(Base):
     __tablename__ = "consultation_sessions"
@@ -198,6 +209,13 @@ async def init_db():
             ],
             "patient_chat_sessions": [
                 ("title", "VARCHAR"),
+            ],
+            "users": [
+                ("google_email", "VARCHAR"),
+                ("google_refresh_token", "TEXT"),
+                ("google_access_token", "TEXT"),
+                ("google_token_expiry", "DATETIME"),
+                ("google_scopes", "TEXT"),
             ],
         }
 

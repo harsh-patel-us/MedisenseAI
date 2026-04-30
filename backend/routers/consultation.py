@@ -22,12 +22,18 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from config import settings
-from database import User
+from database import User, get_db
 from services.auth_service import get_current_user, require_role
 from services.claude_service import generate_patient_explanation, generate_soap_note
+from services.google_calendar import (
+    CalendarEventResult,
+    calendar_invite_available,
+    create_meeting_event,
+)
 from services.ner import extract_medical_entities
 from services.pdf_export import generate_consultation_patient_pdf, generate_soap_pdf
 from services.transcription import transcribe_audio
+from sqlalchemy.ext.asyncio import AsyncSession
 from utils.helpers import generate_id
 
 logger = logging.getLogger(__name__)
@@ -50,6 +56,7 @@ class ScheduleRoomRequest(BaseModel):
     doctor_name: str = "Doctor"
     patient_name: str = "Patient"
     patient_email: Optional[str] = None
+    doctor_email: Optional[str] = None
     scheduled_at: str  # ISO 8601 datetime string
     duration_minutes: int = 30
     reason: str = ""
@@ -69,11 +76,18 @@ class ScheduledMeetingResponse(BaseModel):
     doctor_name: str
     patient_name: str
     patient_email: Optional[str] = None
+    doctor_email: Optional[str] = None
     scheduled_at: str
     duration_minutes: int
     reason: str
     status: str
     created_at: str
+    organizer_role: Optional[str] = None
+    meet_link: Optional[str] = None
+    google_event_id: Optional[str] = None
+    google_event_link: Optional[str] = None
+    google_invite_status: str = "skipped"  # "sent" | "skipped" | "failed"
+    google_invite_error: Optional[str] = None
 
 
 # ── REST endpoints ─────────────────────────────────────────────────────────
@@ -111,44 +125,136 @@ async def create_room(
 @router.post("/schedule", response_model=ScheduledMeetingResponse)
 async def schedule_room(
     request: ScheduleRoomRequest,
-    _user: User = Depends(require_role("doctor")),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """Create a scheduled consultation. Returns a shareable room_id both parties use at the appointed time."""
+    """Create a scheduled consultation. Either a doctor or a patient may
+    organize. If the organizer has connected Google Calendar, an event
+    with a Google Meet link is inserted on their primary calendar and the
+    other party is invited (Google emails them automatically)."""
     room_id = str(uuid.uuid4())[:8].upper()
     session_id = generate_id()
     created_at = datetime.utcnow().isoformat()
+
+    # Resolve who's who based on the authenticated user's role. The organizer
+    # is always the current user; the attendee is the "other party" supplied
+    # in the request.
+    organizer_role = user.role  # "doctor" | "patient"
+    if organizer_role == "doctor":
+        doctor_name = (request.doctor_name or user.full_name).strip()
+        patient_name = (request.patient_name or "Patient").strip()
+        doctor_email = request.doctor_email or user.email
+        patient_email = request.patient_email
+        attendee_email = patient_email
+        attendee_name = patient_name
+    elif organizer_role == "patient":
+        doctor_name = (request.doctor_name or "Doctor").strip()
+        patient_name = (request.patient_name or user.full_name).strip()
+        doctor_email = request.doctor_email
+        patient_email = request.patient_email or user.email
+        attendee_email = doctor_email
+        attendee_name = doctor_name
+    else:
+        raise HTTPException(status_code=403, detail="Only doctors or patients may schedule.")
+
+    room_url = (
+        f"{settings.frontend_url.rstrip('/')}/consultation/room/{room_id}"
+    )
+    title = f"MediSense Consultation — {doctor_name} & {patient_name}"
+    description_lines = [
+        "MediSense AI live consultation.",
+        "",
+        f"Doctor: {doctor_name}",
+        f"Patient: {patient_name}",
+    ]
+    if request.reason.strip():
+        description_lines += ["", f"Reason: {request.reason.strip()}"]
+    description_lines += ["", f"In-app room: {room_url}", f"Room ID: {room_id}"]
+    description = "\n".join(description_lines)
+
+    meet_link: Optional[str] = None
+    event_id: Optional[str] = None
+    event_link: Optional[str] = None
+    invite_status = "skipped"
+    invite_error: Optional[str] = None
+
+    if calendar_invite_available(user):
+        if not attendee_email:
+            invite_status = "failed"
+            invite_error = (
+                f"Add the {('patient' if organizer_role == 'doctor' else 'doctor')}"
+                "'s email so we can include them on the calendar invite."
+            )
+        else:
+            try:
+                event: CalendarEventResult = await create_meeting_event(
+                    db=db,
+                    organizer=user,
+                    attendee_email=attendee_email,
+                    attendee_name=attendee_name,
+                    title=title,
+                    description=description,
+                    start_iso=request.scheduled_at,
+                    duration_minutes=request.duration_minutes,
+                )
+                meet_link = event.meet_link
+                event_id = event.event_id
+                event_link = event.html_link
+                invite_status = "sent"
+            except Exception as exc:
+                logger.error(
+                    f"Calendar invite failed for room {room_id}: {exc}", exc_info=True
+                )
+                invite_status = "failed"
+                invite_error = (
+                    "Could not create the Google Calendar event. "
+                    "Check that the platform Google account is configured."
+                )
 
     _rooms[room_id] = {
         "doctor_ws": None,
         "patient_ws": None,
         "transcript": [],
         "session_id": session_id,
-        "doctor_name": request.doctor_name,
-        "patient_name": request.patient_name,
-        "patient_email": request.patient_email,
+        "doctor_name": doctor_name,
+        "patient_name": patient_name,
+        "patient_email": patient_email,
+        "doctor_email": doctor_email,
         "scheduled_at": request.scheduled_at,
         "duration_minutes": request.duration_minutes,
         "reason": request.reason,
         "status": "scheduled",
         "created_at": created_at,
+        "organizer_id": user.id,
+        "organizer_role": organizer_role,
+        "meet_link": meet_link,
+        "google_event_id": event_id,
+        "google_event_link": event_link,
         "soap_note": None,
         "patient_explanation": None,
     }
     logger.info(
         f"Consultation scheduled: {room_id} at {request.scheduled_at} "
-        f"(doctor={request.doctor_name}, patient={request.patient_name})"
+        f"(organizer={organizer_role} {user.id}, invite={invite_status})"
     )
     return ScheduledMeetingResponse(
         room_id=room_id,
         session_id=session_id,
-        doctor_name=request.doctor_name,
-        patient_name=request.patient_name,
-        patient_email=request.patient_email,
+        doctor_name=doctor_name,
+        patient_name=patient_name,
+        patient_email=patient_email,
+        doctor_email=doctor_email,
         scheduled_at=request.scheduled_at,
         duration_minutes=request.duration_minutes,
         reason=request.reason,
         status="scheduled",
         created_at=created_at,
+        organizer_role=organizer_role,
+        meet_link=meet_link,
+        google_event_id=event_id,
+        google_event_link=event_link,
+        google_invite_status=invite_status,
+        google_invite_error=invite_error,
     )
 
 
@@ -165,11 +271,15 @@ async def list_scheduled():
             "doctor_name": room["doctor_name"],
             "patient_name": room["patient_name"],
             "patient_email": room.get("patient_email"),
+            "doctor_email": room.get("doctor_email"),
             "scheduled_at": room["scheduled_at"],
             "duration_minutes": room.get("duration_minutes", 30),
             "reason": room.get("reason", ""),
             "status": room["status"],
             "created_at": room.get("created_at", ""),
+            "organizer_role": room.get("organizer_role"),
+            "meet_link": room.get("meet_link"),
+            "google_event_link": room.get("google_event_link"),
         })
     items.sort(key=lambda x: x["scheduled_at"])
     return {"meetings": items}
