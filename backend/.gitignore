@@ -9,3 +9,5 @@ testing_images
 conversations
 .env.dev
 .env
+*.db
+medisense.db
