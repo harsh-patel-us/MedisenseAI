@@ -59,6 +59,14 @@ class ConsultationSession(Base):
     soap_pdf_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, default="in_progress")
 
+    # ── Google Meet linkage ──────────────────────────────────────────────
+    # Set by /meet/link-conference once the doctor has scheduled the call;
+    # processing_status / processing_task_id track the async transcript →
+    # diarization → NER → SOAP pipeline kicked off from /meet/process-transcript.
+    meet_conference_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    processing_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    processing_task_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
 
 class ChatbotSession(Base):
     """Persistent transcript for the website chatbot widget.
@@ -192,6 +200,9 @@ async def init_db():
                 ("patient_name", "VARCHAR"),
                 ("soap_pdf_path", "VARCHAR"),
                 ("soap_pdf_size", "INTEGER"),
+                ("meet_conference_id", "VARCHAR"),
+                ("processing_status", "VARCHAR"),
+                ("processing_task_id", "VARCHAR"),
             ],
             "patient_analyses": [
                 ("patient_id", "VARCHAR"),

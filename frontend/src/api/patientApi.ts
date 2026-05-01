@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { UploadResponse, PatientAnalysis } from '../types/patient.types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function uploadReport(file: File): Promise<UploadResponse> {
   const formData = new FormData();

@@ -14,6 +14,7 @@ from routers import (
     consultation,
     doctor,
     google_oauth,
+    meet,
     patient,
     patient_chatbot,
 )
@@ -63,17 +64,22 @@ app.add_middleware(
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────
-app.include_router(auth.router)
-app.include_router(doctor.router)
-app.include_router(patient.router)
-app.include_router(consultation.router)
-app.include_router(chatbot.router)
-app.include_router(patient_chatbot.router)
-app.include_router(google_oauth.router)
+# All routers live under /api so frontend SPA routes like /doctor, /patient,
+# /consultation etc. are never intercepted by the Vite dev-server proxy.
+_API = "/api"
+app.include_router(auth.router, prefix=_API)
+app.include_router(doctor.router, prefix=_API)
+app.include_router(patient.router, prefix=_API)
+app.include_router(consultation.router, prefix=_API)
+app.include_router(chatbot.router, prefix=_API)
+app.include_router(patient_chatbot.router, prefix=_API)
+app.include_router(google_oauth.router, prefix=_API)
+app.include_router(meet.router, prefix=_API)
 
 
 # ── Health check ───────────────────────────────────────────────────────────
 @app.get("/health", tags=["system"])
+@app.get("/api/health", tags=["system"])
 async def health_check():
     return {
         "status": "ok",

@@ -48,6 +48,10 @@ from models.patient_chatbot_models import (
     PatientChatResponse,
     PatientChatSessionMessagesResponse,
     PatientChatSessionSummary,
+    PatientTTSRequest,
+    PatientTTSResponse,
+    PatientVoiceMessageRequest,
+    PatientVoiceMessageResponse,
 )
 from services.auth_service import get_current_user
 from services.patient_chatbot import (
@@ -55,6 +59,8 @@ from services.patient_chatbot import (
     generate_chat_reply,
     generate_session_summary,
 )
+from services.sarvam_stt_service import transcribe as sarvam_transcribe
+from services.sarvam_tts_service import synthesize as sarvam_synthesize
 from utils.helpers import generate_id
 
 logger = logging.getLogger(__name__)
@@ -500,4 +506,123 @@ async def end_session(
         session_id=session.id,
         ended_at=session.ended_at,
         summary_generated=summary_will_run,
+    )
+
+
+# ── POST /patient/chat/voice-message ─────────────────────────────────────
+
+
+ALLOWED_AUDIO_MIMES = {
+    "audio/webm",
+    "audio/ogg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/m4a",
+    "audio/flac",
+}
+
+
+def _decode_audio(req: PatientVoiceMessageRequest) -> bytes:
+    mime = (req.mime_type or "audio/webm").lower()
+    if mime not in ALLOWED_AUDIO_MIMES:
+        raise HTTPException(
+            status_code=415, detail=f"Unsupported audio type: {req.mime_type}"
+        )
+    blob = req.audio_base64
+    if blob.startswith("data:"):
+        comma = blob.find(",")
+        if comma == -1:
+            raise HTTPException(status_code=400, detail="Malformed audio data URI.")
+        blob = blob[comma + 1 :]
+    try:
+        raw = base64.b64decode(blob, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid base64 audio.")
+    if len(raw) == 0:
+        raise HTTPException(status_code=400, detail="Audio payload is empty.")
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio exceeds the {settings.max_file_size_mb} MB limit.",
+        )
+    return raw
+
+
+@router.post("/voice-message", response_model=PatientVoiceMessageResponse)
+async def voice_message(
+    payload: PatientVoiceMessageRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PatientVoiceMessageResponse:
+    """Transcribe a recorded voice clip via Sarvam (codemix mode) so the
+    patient can confirm/edit before it is sent as a chat message. Falls back
+    to Gemini Flash transcription when Sarvam isn't configured."""
+    verify_patient_ownership(payload.patient_id, user)
+
+    audio_bytes = _decode_audio(payload)
+    result = await sarvam_transcribe(
+        audio_bytes,
+        mime=(payload.mime_type or "audio/webm").lower(),
+        mode="codemix",
+    )
+
+    await _audit(
+        db,
+        user.id,
+        action="voice_transcribe",
+        request=request,
+        detail=json.dumps(
+            {"bytes": len(audio_bytes), "provider": result.provider}
+        ),
+    )
+    await db.commit()
+
+    return PatientVoiceMessageResponse(
+        transcript=result.text,
+        language=result.language,
+        provider=result.provider,
+    )
+
+
+# ── POST /patient/chat/tts ───────────────────────────────────────────────
+
+
+@router.post("/tts", response_model=PatientTTSResponse)
+async def tts(
+    payload: PatientTTSRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PatientTTSResponse:
+    """Synthesize an assistant reply with Sarvam bulbul:v3 so the patient
+    can hear it back. Returns an empty payload (provider="none") when Sarvam
+    isn't configured — the frontend just skips playback in that case."""
+    if user.role != "patient":
+        raise HTTPException(status_code=403, detail="Patient role required.")
+
+    result = await sarvam_synthesize(
+        payload.text,
+        language_code=payload.language_code,
+        speaker=payload.speaker,
+    )
+
+    await _audit(
+        db,
+        user.id,
+        action="voice_tts",
+        request=request,
+        detail=json.dumps({"chars": len(payload.text), "provider": result.provider}),
+    )
+    await db.commit()
+
+    return PatientTTSResponse(
+        audio_base64=result.audio_base64,
+        mime_type=result.mime_type if result.audio_base64 else "",
+        provider=result.provider,
+        language=result.language,
+        speaker=result.speaker,
     )

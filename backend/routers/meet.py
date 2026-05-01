@@ -1,0 +1,581 @@
+"""
+meet.py — Google Meet integration: link a Meet conference to an in-app
+consultation session and process its post-call transcript through the
+existing diarization → NER → SOAP generation pipeline.
+
+Endpoints
+---------
+POST /meet/link-conference         — bind meet_conference_id to a session
+POST /meet/process-transcript      — kick off background processing, returns task_id
+GET  /meet/process-status/{tid}    — poll processing status / result
+POST /meet/webhook                 — Google "meeting ended" webhook (HMAC-SHA256)
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import hmac
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Optional
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Request,
+)
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from config import settings
+from database import AsyncSessionLocal, ConsultationSession, User, get_db
+from services.auth_service import get_current_user, require_role
+from services.claude_service import (
+    generate_patient_explanation,
+    generate_soap_note,
+)
+from services.google_calendar import (
+    _platform_credentials,
+    platform_is_configured,
+)
+from services.ner import extract_medical_entities
+from services.pdf_export import generate_soap_pdf
+from utils.helpers import generate_id
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/meet", tags=["meet"])
+
+
+# ── Task registry ────────────────────────────────────────────────────────
+
+@dataclass
+class _MeetTask:
+    task_id: str
+    session_id: str
+    status: str = "pending"          # "pending" | "running" | "completed" | "failed"
+    detail: str = ""
+    started_at: datetime = field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+    soap_note: Optional[dict] = None
+    patient_explanation: Optional[dict] = None
+    transcript_segments: list[dict] = field(default_factory=list)
+
+
+# Single-process, in-memory — fine for the dev / single-worker setup the rest
+# of the app already uses (see `_rooms` in consultation.py).
+_tasks: dict[str, _MeetTask] = {}
+
+
+# ── Schemas ──────────────────────────────────────────────────────────────
+
+
+class LinkConferenceRequest(BaseModel):
+    session_id: str = Field(..., max_length=64)
+    meet_conference_id: str = Field(..., max_length=200)
+    room_id: Optional[str] = Field(default=None, max_length=64)
+    patient_name: Optional[str] = Field(default=None, max_length=200)
+    doctor_name: Optional[str] = Field(default=None, max_length=200)
+
+
+class LinkConferenceResponse(BaseModel):
+    session_id: str
+    meet_conference_id: str
+    status: str
+
+
+class ProcessTranscriptRequest(BaseModel):
+    session_id: str
+    meet_conference_id: Optional[str] = None
+
+
+class ProcessTranscriptResponse(BaseModel):
+    task_id: str
+    session_id: str
+    status: str
+
+
+class ProcessStatusResponse(BaseModel):
+    task_id: str
+    session_id: str
+    status: str
+    detail: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    soap_note: Optional[dict] = None
+    patient_explanation: Optional[dict] = None
+    transcript: list[dict] = Field(default_factory=list)
+
+
+class UnprocessedSessionDTO(BaseModel):
+    session_id: str
+    doctor_name: Optional[str] = None
+    patient_name: Optional[str] = None
+    meet_conference_id: Optional[str] = None
+    processing_status: Optional[str] = None
+    created_at: datetime
+
+
+# ── Endpoint: list unprocessed sessions ──────────────────────────────────
+
+
+@router.get("/sessions/unprocessed", response_model=list[UnprocessedSessionDTO])
+async def list_unprocessed(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("doctor")),
+) -> list[UnprocessedSessionDTO]:
+    """Return this doctor's Meet-linked sessions that haven't produced a
+    SOAP note yet. Drives the 'Process Google Meet Consultation' panel on
+    the doctor dashboard."""
+    rows = (
+        await db.execute(
+            select(ConsultationSession)
+            .where(
+                ConsultationSession.doctor_id == user.id,
+                ConsultationSession.meet_conference_id.is_not(None),
+            )
+            .order_by(ConsultationSession.created_at.desc())
+        )
+    ).scalars().all()
+
+    return [
+        UnprocessedSessionDTO(
+            session_id=r.id,
+            doctor_name=r.doctor_name,
+            patient_name=r.patient_name,
+            meet_conference_id=r.meet_conference_id,
+            processing_status=r.processing_status,
+            created_at=r.created_at,
+        )
+        for r in rows
+        if (r.processing_status or "pending") != "completed"
+    ]
+
+
+# ── Endpoint: link a Google Meet conference to a session ─────────────────
+
+
+@router.post("/link-conference", response_model=LinkConferenceResponse)
+async def link_conference(
+    payload: LinkConferenceRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> LinkConferenceResponse:
+    """Bind a Meet conference id to a ConsultationSession row, creating the
+    row on first call so the doctor dashboard can list it for processing."""
+    row = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.id == payload.session_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if row is None:
+        row = ConsultationSession(
+            id=payload.session_id,
+            doctor_id=user.id if user.role == "doctor" else None,
+            doctor_name=payload.doctor_name,
+            patient_name=payload.patient_name,
+            status="scheduled",
+        )
+        db.add(row)
+    else:
+        if user.role == "doctor" and row.doctor_id is None:
+            row.doctor_id = user.id
+        if payload.doctor_name and not row.doctor_name:
+            row.doctor_name = payload.doctor_name
+        if payload.patient_name and not row.patient_name:
+            row.patient_name = payload.patient_name
+
+    row.meet_conference_id = payload.meet_conference_id
+    row.processing_status = row.processing_status or "pending"
+    await db.commit()
+
+    return LinkConferenceResponse(
+        session_id=row.id,
+        meet_conference_id=row.meet_conference_id,
+        status=row.processing_status,
+    )
+
+
+# ── Endpoint: kick off background processing ────────────────────────────
+
+
+@router.post("/process-transcript", response_model=ProcessTranscriptResponse)
+async def process_transcript(
+    payload: ProcessTranscriptRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("doctor")),
+) -> ProcessTranscriptResponse:
+    row = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.id == payload.session_id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Consultation session not found.")
+    if row.doctor_id and row.doctor_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your consultation.")
+
+    conf_id = payload.meet_conference_id or row.meet_conference_id
+    if not conf_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No Meet conference id linked to this session.",
+        )
+
+    task = _MeetTask(task_id=generate_id(), session_id=payload.session_id)
+    task.status = "pending"
+    _tasks[task.task_id] = task
+
+    row.meet_conference_id = conf_id
+    row.processing_task_id = task.task_id
+    row.processing_status = "pending"
+    await db.commit()
+
+    background.add_task(_run_meet_pipeline, task.task_id, payload.session_id, conf_id)
+
+    return ProcessTranscriptResponse(
+        task_id=task.task_id,
+        session_id=payload.session_id,
+        status=task.status,
+    )
+
+
+# ── Endpoint: poll status ───────────────────────────────────────────────
+
+
+@router.get("/process-status/{task_id}", response_model=ProcessStatusResponse)
+async def process_status(
+    task_id: str = Path(...),
+    user: User = Depends(get_current_user),
+) -> ProcessStatusResponse:
+    task = _tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return ProcessStatusResponse(
+        task_id=task.task_id,
+        session_id=task.session_id,
+        status=task.status,
+        detail=task.detail,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        soap_note=task.soap_note,
+        patient_explanation=task.patient_explanation,
+        transcript=task.transcript_segments,
+    )
+
+
+# ── Endpoint: Google webhook ─────────────────────────────────────────────
+
+
+def _verify_hmac(raw_body: bytes, signature: str | None) -> bool:
+    """Validate `X-MediSense-Signature: sha256=<hex>` against the configured
+    shared secret. Returns True when no secret is configured (dev mode)."""
+    secret = settings.google_meet_webhook_secret
+    if not secret:
+        return True
+    if not signature:
+        return False
+    try:
+        algo, _, sent_hex = signature.partition("=")
+    except ValueError:
+        return False
+    if algo.lower() != "sha256" or not sent_hex:
+        return False
+    digest = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(digest, sent_hex.lower())
+
+
+class WebhookResponse(BaseModel):
+    accepted: bool
+    task_id: Optional[str] = None
+    detail: str = ""
+
+
+@router.post("/webhook", response_model=WebhookResponse)
+async def meet_webhook(
+    request: Request,
+    background: BackgroundTasks,
+    x_medisense_signature: Optional[str] = Header(default=None),
+    x_meet_signature: Optional[str] = Header(default=None),
+) -> WebhookResponse:
+    """Receive Google's 'meeting ended' push and auto-trigger processing.
+
+    Body shape (best-effort): `{ "conferenceId": "...", "sessionId": "..." }`.
+    SessionId is optional — when omitted we look up the consultation by
+    meet_conference_id."""
+    raw = await request.body()
+    sig = x_medisense_signature or x_meet_signature
+    if not _verify_hmac(raw, sig):
+        raise HTTPException(status_code=401, detail="Invalid signature.")
+
+    try:
+        body = json.loads(raw or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON.")
+
+    conf_id = body.get("conferenceId") or body.get("meet_conference_id")
+    session_id = body.get("sessionId") or body.get("session_id")
+    if not conf_id and not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook needs conferenceId or sessionId.",
+        )
+
+    async with AsyncSessionLocal() as db:
+        row: Optional[ConsultationSession] = None
+        if session_id:
+            row = (
+                await db.execute(
+                    select(ConsultationSession).where(
+                        ConsultationSession.id == session_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None and conf_id:
+            row = (
+                await db.execute(
+                    select(ConsultationSession).where(
+                        ConsultationSession.meet_conference_id == conf_id
+                    )
+                )
+            ).scalar_one_or_none()
+
+        if row is None:
+            return WebhookResponse(
+                accepted=False,
+                detail="No consultation found for this conference.",
+            )
+
+        if conf_id and not row.meet_conference_id:
+            row.meet_conference_id = conf_id
+
+        task = _MeetTask(task_id=generate_id(), session_id=row.id)
+        _tasks[task.task_id] = task
+        row.processing_task_id = task.task_id
+        row.processing_status = "pending"
+        await db.commit()
+
+        background.add_task(
+            _run_meet_pipeline, task.task_id, row.id, row.meet_conference_id or conf_id
+        )
+
+    return WebhookResponse(accepted=True, task_id=task.task_id)
+
+
+# ── Background pipeline ──────────────────────────────────────────────────
+
+
+async def _run_meet_pipeline(task_id: str, session_id: str, conference_id: str) -> None:
+    """End-to-end: fetch Meet transcript → diarize → NER → SOAP → patient guide.
+
+    Persists results on the ConsultationSession row and the in-memory task
+    so the frontend poll can render them in `SoapNoteEditor`."""
+    task = _tasks.get(task_id)
+    if task is None:
+        return
+    task.status = "running"
+    task.detail = "Fetching Meet transcript…"
+
+    async with AsyncSessionLocal() as db:
+        try:
+            row = (
+                await db.execute(
+                    select(ConsultationSession).where(
+                        ConsultationSession.id == session_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                raise RuntimeError("Consultation session disappeared mid-pipeline.")
+            row.processing_status = "running"
+            await db.commit()
+
+            # 1. Fetch transcript entries from Google Meet API.
+            entries = await _fetch_meet_transcript_entries(conference_id)
+            if not entries:
+                raise RuntimeError(
+                    "No transcript entries returned from Meet. "
+                    "Ensure transcripts are enabled on the Workspace plan."
+                )
+            task.detail = f"Diarizing {len(entries)} transcript entries…"
+
+            # 2. Diarize / label segments. Meet's transcript already carries
+            #    speaker IDs per entry — alternate map to DOCTOR/PATIENT in
+            #    first-seen order, which is what services.diarization does.
+            segments = _label_speakers_from_meet(entries)
+            task.transcript_segments = segments
+
+            # 3. NER on the full text.
+            full_text = " ".join(seg["text"] for seg in segments if seg.get("text"))
+            entities = extract_medical_entities(full_text)
+            task.detail = "Generating SOAP note…"
+
+            # 4. SOAP note via existing claude_service.
+            labeled = "\n".join(
+                f"[{seg['speaker']}]: {seg['text']}" for seg in segments
+            )
+            soap = await generate_soap_note(
+                labeled_transcript=labeled,
+                symptoms=entities.get("symptoms", []),
+                medications=entities.get("medications", []),
+                diagnoses=entities.get("diagnoses", []),
+                vitals=entities.get("vitals", []),
+            )
+            task.soap_note = soap
+
+            # 5. Patient-friendly explanation.
+            task.detail = "Generating patient summary…"
+            explanation = await generate_patient_explanation(
+                soap_dict=soap,
+                patient_name=row.patient_name or "Patient",
+                doctor_name=row.doctor_name or "Doctor",
+            )
+            task.patient_explanation = explanation
+
+            # 6. PDF export (best-effort — failure here doesn't fail the task).
+            try:
+                pdf_bytes = generate_soap_pdf(
+                    soap_note=soap,
+                    patient_name=row.patient_name or "Patient",
+                    doctor_name=row.doctor_name or "Doctor",
+                    session_id=row.id,
+                )
+                if pdf_bytes:
+                    from utils.storage import save_soap_pdf  # local import to avoid cycles
+
+                    pdf_path = save_soap_pdf(row.id, pdf_bytes)
+                    row.soap_pdf_path = pdf_path
+                    row.soap_pdf_size = len(pdf_bytes)
+            except Exception as pdf_exc:
+                logger.warning(f"SOAP PDF export failed for {row.id}: {pdf_exc}")
+
+            # 7. Persist on the consultation row.
+            row.raw_transcript = full_text
+            row.labeled_transcript = json.dumps(segments)
+            row.extracted_entities = json.dumps(entities)
+            row.soap_note = json.dumps(soap)
+            row.status = "completed"
+            row.processing_status = "completed"
+            await db.commit()
+
+            task.status = "completed"
+            task.detail = "Done."
+            task.completed_at = datetime.utcnow()
+
+        except Exception as exc:
+            logger.error(
+                f"Meet processing failed for session {session_id}: {exc}",
+                exc_info=True,
+            )
+            task.status = "failed"
+            task.detail = str(exc)
+            task.completed_at = datetime.utcnow()
+            try:
+                if "row" in locals() and row is not None:
+                    row.processing_status = "failed"
+                    await db.commit()
+            except Exception:
+                pass
+
+
+# ── Google Meet API helpers ──────────────────────────────────────────────
+
+
+async def _fetch_meet_transcript_entries(conference_id: str) -> list[dict]:
+    """List every transcript entry on the given Meet conferenceRecord.
+
+    Uses the platform Google account's OAuth credentials. Requires the
+    Meet REST API to be enabled on the Cloud project and the account to
+    have access to the recorded transcript. Returns [] when transcripts
+    aren't available so the caller can surface a clear error."""
+    if not platform_is_configured():
+        raise RuntimeError(
+            "Platform Google credentials are not configured. "
+            "Cannot fetch Meet transcript."
+        )
+
+    def _list_entries() -> list[dict]:
+        creds = _platform_credentials()
+        meet = build("meet", "v2", credentials=creds, cache_discovery=False)
+        # Meet requires the conferenceRecord resource path. Accept either the
+        # bare id ("abc-defg-hij") or the full resource ("conferenceRecords/...").
+        record_path = (
+            conference_id
+            if conference_id.startswith("conferenceRecords/")
+            else f"conferenceRecords/{conference_id}"
+        )
+
+        # 1. List transcripts on this conferenceRecord.
+        try:
+            transcripts_resp = (
+                meet.conferenceRecords()
+                .transcripts()
+                .list(parent=record_path)
+                .execute()
+            )
+        except HttpError as exc:
+            raise RuntimeError(f"Meet API list transcripts failed: {exc}")
+
+        transcripts = transcripts_resp.get("transcripts") or []
+        if not transcripts:
+            return []
+
+        # 2. Pull entries from every transcript on the record (usually 1).
+        all_entries: list[dict] = []
+        for tr in transcripts:
+            transcript_name = tr.get("name")
+            if not transcript_name:
+                continue
+            page_token: Optional[str] = None
+            while True:
+                req = (
+                    meet.conferenceRecords()
+                    .transcripts()
+                    .entries()
+                    .list(parent=transcript_name, pageToken=page_token)
+                )
+                resp = req.execute()
+                all_entries.extend(resp.get("transcriptEntries") or [])
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        return all_entries
+
+    return await asyncio.to_thread(_list_entries)
+
+
+def _label_speakers_from_meet(entries: list[dict]) -> list[dict]:
+    """Map Meet `participant` references to DOCTOR / PATIENT using
+    first-seen order — the same convention used by services.diarization."""
+    role_map: dict[str, str] = {}
+    out: list[dict] = []
+    for entry in entries:
+        participant = entry.get("participant") or entry.get("speaker") or "unknown"
+        if participant not in role_map:
+            role_map[participant] = "DOCTOR" if not role_map else "PATIENT"
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "speaker": role_map[participant],
+                "text": text,
+                "timestamp": entry.get("startTime") or entry.get("endTime") or "",
+                "confidence": 0.9,
+            }
+        )
+    return out

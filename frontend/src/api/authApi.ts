@@ -6,7 +6,7 @@ import type {
   RegisterRequest,
 } from '../types/auth.types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'medisense_token';
 const USER_KEY = 'medisense_user';
 

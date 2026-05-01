@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { GenerateNoteResponse, TranscriptSegment, SoapNote, SessionInfo } from '../types/doctor.types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function generateNote(
   transcript: TranscriptSegment[],
@@ -41,5 +41,5 @@ export async function getSessions(): Promise<SessionInfo[]> {
 export function createAudioWebSocket(): WebSocket {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsHost = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.hostname}:8000`;
-  return new WebSocket(`${wsHost}/doctor/stream-audio`);
+  return new WebSocket(`${wsHost}/api/doctor/stream-audio`);
 }

@@ -6,7 +6,7 @@ import type {
   ScheduledMeeting,
 } from '../types/consultation.types';
 
-const API = '';
+const API = '/api';
 
 export async function createRoom(
   doctorName: string,
@@ -58,7 +58,7 @@ export function createConsultationWebSocket(roomId: string, role: string): WebSo
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
   return new WebSocket(
-    `${protocol}//${host}/consultation/ws/${roomId}?role=${role}`,
+    `${protocol}//${host}/api/consultation/ws/${roomId}?role=${role}`,
   );
 }
 

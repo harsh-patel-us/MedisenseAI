@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import AudioRecorder from '../components/doctor/AudioRecorder';
@@ -6,6 +6,12 @@ import LiveTranscript from '../components/doctor/LiveTranscript';
 import SoapNoteEditor from '../components/doctor/SoapNoteEditor';
 import { generateNote } from '../api/doctorApi';
 import { createRoom } from '../api/consultationApi';
+import {
+  listUnprocessedSessions,
+  processTranscript,
+  getProcessStatus,
+} from '../api/meetApi';
+import type { UnprocessedSession, ProcessStatusResponse } from '../api/meetApi';
 import type { SoapNote, MedicalEntities } from '../types/doctor.types';
 
 export default function DoctorDashboard() {
@@ -72,6 +78,90 @@ export default function DoctorDashboard() {
     setSoapNote(null);
     setEntities(null);
     setGenError(null);
+  };
+
+  /* ── Google Meet processing state ────────────────────────────────── */
+  const [meetSessions, setMeetSessions] = useState<UnprocessedSession[]>([]);
+  const [meetLoading, setMeetLoading] = useState(false);
+  const [meetStatus, setMeetStatus] = useState<Record<string, ProcessStatusResponse>>({});
+  const [meetSoapNote, setMeetSoapNote] = useState<SoapNote | null>(null);
+  const [meetSessionId, setMeetSessionId] = useState<string | null>(null);
+  const pollTimerRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  const loadMeetSessions = useCallback(async () => {
+    setMeetLoading(true);
+    try {
+      const sessions = await listUnprocessedSessions();
+      setMeetSessions(sessions);
+    } catch {
+      // non-fatal
+    } finally {
+      setMeetLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMeetSessions();
+    return () => {
+      // Cleanup all poll timers on unmount
+      Object.values(pollTimerRef.current).forEach(clearInterval);
+    };
+  }, [loadMeetSessions]);
+
+  const handleProcessMeet = async (sessionId: string) => {
+    try {
+      const res = await processTranscript({ session_id: sessionId });
+      setMeetStatus((s) => ({
+        ...s,
+        [sessionId]: {
+          task_id: res.task_id,
+          session_id: sessionId,
+          status: 'pending',
+          detail: 'Starting...',
+          started_at: new Date().toISOString(),
+          completed_at: null,
+          soap_note: null,
+          patient_explanation: null,
+          transcript: [],
+        },
+      }));
+      // Start polling
+      const timer = setInterval(async () => {
+        try {
+          const status = await getProcessStatus(res.task_id);
+          setMeetStatus((s) => ({ ...s, [sessionId]: status }));
+          if (status.status === 'completed' || status.status === 'failed') {
+            clearInterval(timer);
+            delete pollTimerRef.current[sessionId];
+            if (status.status === 'completed' && status.soap_note) {
+              setMeetSoapNote(status.soap_note as unknown as SoapNote);
+              setMeetSessionId(sessionId);
+            }
+            // Refresh list
+            loadMeetSessions();
+          }
+        } catch {
+          clearInterval(timer);
+          delete pollTimerRef.current[sessionId];
+        }
+      }, 3000);
+      pollTimerRef.current[sessionId] = timer;
+    } catch {
+      setMeetStatus((s) => ({
+        ...s,
+        [sessionId]: {
+          task_id: '',
+          session_id: sessionId,
+          status: 'failed',
+          detail: 'Failed to start processing. Is the backend running?',
+          started_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          soap_note: null,
+          patient_explanation: null,
+          transcript: [],
+        },
+      }));
+    }
   };
 
   return (
@@ -330,6 +420,244 @@ export default function DoctorDashboard() {
           }
         }
       `}</style>
+
+      {/* ── Process Google Meet Consultation ──────────────────────── */}
+      <div style={{ marginTop: 32 }}>
+        <div
+          className="glass-card"
+          style={{ padding: '28px', marginBottom: 24 }}
+          id="meet-processing-section"
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 20,
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  fontSize: '1.15rem',
+                  fontWeight: 800,
+                  marginBottom: 4,
+                }}
+              >
+                📹 Process Google Meet Consultation
+              </h2>
+              <p
+                style={{
+                  fontSize: '0.82rem',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                Meet sessions linked via scheduling appear here. Process the
+                transcript to generate a SOAP note automatically.
+              </p>
+            </div>
+            <button
+              className="btn-secondary"
+              onClick={loadMeetSessions}
+              disabled={meetLoading}
+              style={{ fontSize: '0.8rem', padding: '8px 16px' }}
+            >
+              {meetLoading ? '↻ Loading…' : '↻ Refresh'}
+            </button>
+          </div>
+
+          {meetSessions.length === 0 ? (
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+                fontSize: '0.88rem',
+              }}
+            >
+              {meetLoading
+                ? 'Loading…'
+                : 'No unprocessed Google Meet sessions. Schedule a consultation with Google Meet to get started.'}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                maxHeight: 420,
+                overflowY: 'auto',
+              }}
+            >
+              {meetSessions.map((ms) => {
+                const status = meetStatus[ms.session_id];
+                const isProcessing =
+                  status &&
+                  (status.status === 'pending' || status.status === 'running');
+                const isFailed = status?.status === 'failed';
+                const isCompleted = status?.status === 'completed';
+
+                return (
+                  <div
+                    key={ms.session_id}
+                    style={{
+                      padding: '16px 18px',
+                      borderRadius: 12,
+                      background: 'rgba(15,30,60,0.4)',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 8,
+                        gap: 10,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: '0.9rem',
+                            fontWeight: 700,
+                            marginBottom: 2,
+                          }}
+                        >
+                          {ms.doctor_name || 'Doctor'} ↔{' '}
+                          {ms.patient_name || 'Patient'}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.74rem',
+                            color: 'var(--text-muted)',
+                          }}
+                        >
+                          {new Date(ms.created_at).toLocaleString()} ·{' '}
+                          <span
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: '0.7rem',
+                            }}
+                          >
+                            {ms.meet_conference_id || 'No conf. ID'}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {isProcessing && (
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              color: 'var(--brand-teal)',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+                            {status?.detail || 'Processing…'}
+                          </span>
+                        )}
+                        {isFailed && (
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              color: '#f87171',
+                              fontWeight: 600,
+                            }}
+                          >
+                            ⚠ {status?.detail || 'Failed'}
+                          </span>
+                        )}
+                        {isCompleted && (
+                          <span
+                            className="badge badge-normal"
+                          >
+                            ✓ Completed
+                          </span>
+                        )}
+                        {!isProcessing && !isCompleted && (
+                          <button
+                            className="btn-primary"
+                            onClick={() => handleProcessMeet(ms.session_id)}
+                            style={{
+                              padding: '8px 16px',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            ⚡ Process Transcript
+                          </button>
+                        )}
+                        {isCompleted && status?.soap_note && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() => {
+                              setMeetSoapNote(status.soap_note as unknown as SoapNote);
+                              setMeetSessionId(ms.session_id);
+                            }}
+                            style={{
+                              padding: '8px 16px',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            📄 View SOAP Note
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* SOAP Note from Meet processing */}
+        {meetSoapNote && (
+          <div style={{ marginBottom: 24 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12,
+              }}
+            >
+              <h3
+                style={{
+                  fontSize: '1rem',
+                  fontWeight: 700,
+                  color: 'var(--brand-teal)',
+                }}
+              >
+                📹 Google Meet SOAP Note
+              </h3>
+              <button
+                onClick={() => {
+                  setMeetSoapNote(null);
+                  setMeetSessionId(null);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <SoapNoteEditor
+              soapNote={meetSoapNote}
+              sessionId={meetSessionId}
+              onUpdate={setMeetSoapNote}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

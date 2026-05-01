@@ -7,7 +7,7 @@ import type {
   PatientChatSessionDetail,
 } from '../types/patientChatbot.types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function sendPatientChatMessage(
   patientId: string,
@@ -113,3 +113,56 @@ export function fileToBase64(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/* ── Voice / TTS ──────────────────────────────────────────────────── */
+
+export interface VoiceMessageResponse {
+  transcript: string;
+  language: string | null;
+  provider: string; // "sarvam" | "gemini" | "none"
+}
+
+export interface TTSResponse {
+  audio_base64: string;
+  mime_type: string;
+  provider: string; // "sarvam" | "none"
+  language: string | null;
+  speaker: string | null;
+}
+
+/** Transcribe a recorded audio blob via Sarvam (or Gemini Flash fallback). */
+export async function transcribeVoiceMessage(
+  patientId: string,
+  audioBase64: string,
+  mimeType: string = 'audio/webm',
+): Promise<VoiceMessageResponse> {
+  const { data } = await axios.post<VoiceMessageResponse>(
+    `${API_BASE}/patient/chat/voice-message`,
+    {
+      patient_id: patientId,
+      audio_base64: audioBase64,
+      mime_type: mimeType,
+    },
+    { timeout: 60000 },
+  );
+  return data;
+}
+
+/** Synthesize text via Sarvam TTS (returns base64 WAV audio). */
+export async function synthesizeTTS(
+  text: string,
+  languageCode?: string | null,
+  speaker?: string | null,
+): Promise<TTSResponse> {
+  const { data } = await axios.post<TTSResponse>(
+    `${API_BASE}/patient/chat/tts`,
+    {
+      text,
+      language_code: languageCode || undefined,
+      speaker: speaker || undefined,
+    },
+    { timeout: 30000 },
+  );
+  return data;
+}
+

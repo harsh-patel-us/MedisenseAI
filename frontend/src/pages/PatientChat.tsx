@@ -9,6 +9,8 @@ import {
   getPatientChatHistory,
   getPatientChatSession,
   sendPatientChatMessage,
+  transcribeVoiceMessage,
+  synthesizeTTS,
 } from '../api/patientChatbotApi';
 import type {
   ChatAttachmentUpload,
@@ -175,6 +177,18 @@ export default function PatientChat() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Voice (STT) state ────────────────────────────────────────────
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceTranscribing, setVoiceTranscribing] = useState(false);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+
+  // ── TTS state ────────────────────────────────────────────────────
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
+  const ttsAudioRef = useRef<AudioContext | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -415,16 +429,22 @@ export default function PatientChat() {
         activeSessionRef.current = res.session_id;
       }
 
+      const assistantMsg: UiMessage = {
+        id: `srv-${Date.now()}`,
+        role: 'assistant',
+        content: res.reply,
+        created_at: new Date().toISOString(),
+      };
       setMessages((prev) =>
         prev
           .filter((m) => m.id !== loadingMsg.id)
-          .concat({
-            id: `srv-${Date.now()}`,
-            role: 'assistant',
-            content: res.reply,
-            created_at: new Date().toISOString(),
-          }),
+          .concat(assistantMsg),
       );
+
+      // Auto-play TTS if enabled
+      if (ttsEnabled && res.reply) {
+        playTTS(res.reply);
+      }
 
       // Release object URLs for sent images now that previews are gone.
       pendingSnapshot.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
@@ -438,7 +458,7 @@ export default function PatientChat() {
     } finally {
       setSending(false);
     }
-  }, [input, pending, patientId, refreshHistory, sending]);
+  }, [input, pending, patientId, refreshHistory, sending, ttsEnabled]);
 
   /* ── Drag & drop ───────────────────────────────────────────────── */
   const [dragOver, setDragOver] = useState(false);
@@ -449,6 +469,134 @@ export default function PatientChat() {
   };
 
   /* ── Keyboard ──────────────────────────────────────────────────── */
+  /* ── Voice recording helpers ──────────────────────────────────── */
+
+  const startVoiceRecording = useCallback(async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000 },
+      });
+      voiceStreamRef.current = stream;
+      voiceChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      voiceRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) voiceChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Stop tracks
+        if (voiceStreamRef.current) {
+          voiceStreamRef.current.getTracks().forEach((t) => t.stop());
+          voiceStreamRef.current = null;
+        }
+
+        const blob = new Blob(voiceChunksRef.current, { type: mimeType });
+        voiceChunksRef.current = [];
+        if (blob.size === 0) {
+          setIsVoiceRecording(false);
+          return;
+        }
+
+        // Convert to base64 and send for transcription
+        setVoiceTranscribing(true);
+        try {
+          const reader = new FileReader();
+          const b64 = await new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => {
+              const res = reader.result as string;
+              const idx = res.indexOf(',');
+              resolve(idx >= 0 ? res.slice(idx + 1) : res);
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+
+          const result = await transcribeVoiceMessage(
+            patientId,
+            b64,
+            mimeType.split(';')[0],
+          );
+          if (result.transcript) {
+            setInput((prev) => (prev ? prev + ' ' : '') + result.transcript);
+            // Focus the textarea so the patient can review/edit
+            setTimeout(() => inputRef.current?.focus(), 50);
+          } else {
+            setError('Could not transcribe the audio. Please try again or type your message.');
+          }
+        } catch (err) {
+          console.error('Voice transcription failed:', err);
+          setError('Voice transcription failed. Please try typing instead.');
+        } finally {
+          setVoiceTranscribing(false);
+          setIsVoiceRecording(false);
+        }
+      };
+
+      recorder.start();
+      setIsVoiceRecording(true);
+    } catch (err: any) {
+      setError(err.message || 'Could not access microphone.');
+    }
+  }, [patientId]);
+
+  const stopVoiceRecording = useCallback(() => {
+    if (voiceRecorderRef.current && voiceRecorderRef.current.state !== 'inactive') {
+      voiceRecorderRef.current.stop();
+    }
+  }, []);
+
+  /* ── TTS playback ──────────────────────────────────────────────── */
+
+  const playTTS = useCallback(async (text: string) => {
+    try {
+      setTtsPlaying(true);
+      const result = await synthesizeTTS(text);
+      if (!result.audio_base64 || result.provider === 'none') {
+        setTtsPlaying(false);
+        return;
+      }
+
+      // Decode base64 WAV and play via Web Audio API
+      const binaryStr = atob(result.audio_base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      if (!ttsAudioRef.current) {
+        ttsAudioRef.current = new AudioContext();
+      }
+      const ctx = ttsAudioRef.current;
+      if (ctx.state === 'suspended') await ctx.resume();
+
+      const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.onended = () => setTtsPlaying(false);
+      source.start();
+    } catch (err) {
+      console.error('TTS playback failed:', err);
+      setTtsPlaying(false);
+    }
+  }, []);
+
+  // Cleanup audio context on unmount
+  useEffect(() => {
+    return () => {
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -653,6 +801,7 @@ export default function PatientChat() {
             background: 'rgba(6,13,27,0.6)',
             flexShrink: 0,
           }}
+          id="patient-chat-header"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <BotAvatar size={38} />
@@ -663,6 +812,47 @@ export default function PatientChat() {
               </div>
             </div>
           </div>
+          {/* TTS toggle */}
+          <button
+            type="button"
+            onClick={() => setTtsEnabled((v) => !v)}
+            title={ttsEnabled ? 'Disable voice replies' : 'Enable voice replies'}
+            aria-label={ttsEnabled ? 'Disable voice replies' : 'Enable voice replies'}
+            id="tts-toggle-btn"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 14px',
+              borderRadius: 10,
+              background: ttsEnabled
+                ? 'rgba(5,174,187,0.2)'
+                : 'rgba(255,255,255,0.05)',
+              border: ttsEnabled
+                ? '1px solid rgba(5,174,187,0.5)'
+                : '1px solid rgba(255,255,255,0.1)',
+              color: ttsEnabled ? TEAL : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <span style={{ fontSize: 16 }}>{ttsEnabled ? '🔊' : '🔇'}</span>
+            {ttsEnabled ? 'Voice On' : 'Voice Off'}
+            {ttsPlaying && (
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: TEAL,
+                  animation: 'pulse-dot 1.2s infinite',
+                  marginLeft: 2,
+                }}
+              />
+            )}
+          </button>
         </header>
 
         {/* Messages area */}
@@ -785,6 +975,71 @@ export default function PatientChat() {
               }}
             >
               📎
+            </button>
+            {/* Microphone button */}
+            <button
+              type="button"
+              onClick={isVoiceRecording ? stopVoiceRecording : startVoiceRecording}
+              disabled={sending || voiceTranscribing}
+              title={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
+              aria-label={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
+              id="voice-record-btn"
+              style={{
+                background: isVoiceRecording
+                  ? 'rgba(220,38,38,0.2)'
+                  : voiceTranscribing
+                    ? 'rgba(5,174,187,0.15)'
+                    : 'transparent',
+                border: isVoiceRecording
+                  ? '1px solid rgba(220,38,38,0.5)'
+                  : 'none',
+                color: isVoiceRecording
+                  ? '#f87171'
+                  : voiceTranscribing
+                    ? TEAL
+                    : 'var(--text-secondary)',
+                cursor: (sending || voiceTranscribing) ? 'not-allowed' : 'pointer',
+                padding: 8,
+                fontSize: 18,
+                lineHeight: 1,
+                borderRadius: '50%',
+                transition: 'all 0.2s ease',
+                position: 'relative',
+              }}
+            >
+              {voiceTranscribing ? (
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 18,
+                    height: 18,
+                    border: `2px solid ${TEAL}`,
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite',
+                  }}
+                />
+              ) : isVoiceRecording ? (
+                <>
+                  <span style={{ position: 'relative' }}>
+                    🎙️
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -4,
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: '#dc2626',
+                        animation: 'pulse-dot 1.2s infinite',
+                      }}
+                    />
+                  </span>
+                </>
+              ) : (
+                '🎤'
+              )}
             </button>
             <input
               ref={fileInputRef}

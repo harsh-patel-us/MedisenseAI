@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listScheduledMeetings, scheduleConsultation } from '../api/consultationApi';
+import { linkConference } from '../api/meetApi';
 import { useAuth } from '../contexts/AuthContext';
 import type { ScheduledMeeting } from '../types/consultation.types';
 
@@ -195,6 +196,29 @@ export default function SchedulePage() {
         reason: form.reason.trim(),
       });
       setCreated(meeting);
+      // If a Google Meet link was created, link the conference ID to the
+      // ConsultationSession so the Doctor Dashboard can list it for
+      // transcript processing.
+      if (meeting.meet_link && meeting.session_id) {
+        // Extract conference ID from the meet link. Google Meet links look
+        // like https://meet.google.com/abc-defg-hij — the last segment is
+        // the conference id.
+        try {
+          const url = new URL(meeting.meet_link);
+          const confId = url.pathname.split('/').filter(Boolean).pop() || '';
+          if (confId) {
+            await linkConference({
+              session_id: meeting.session_id,
+              meet_conference_id: confId,
+              doctor_name: meeting.doctor_name,
+              patient_name: meeting.patient_name,
+            });
+          }
+        } catch (linkErr) {
+          // Non-fatal — the doctor can still link it manually from the dashboard.
+          console.warn('Could not auto-link Meet conference:', linkErr);
+        }
+      }
       loadUpcoming();
     } catch {
       setError('Failed to schedule the consultation. Is the backend running?');

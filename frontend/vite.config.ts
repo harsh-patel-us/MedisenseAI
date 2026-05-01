@@ -8,31 +8,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/auth': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/doctor': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        ws: true,
-      },
-      '/patient': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/consultation': {
+      // Single /api prefix — avoids collision with SPA routes like
+      // /doctor, /patient, /consultation, /integrations, etc.
+      '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
-      },
-      '/chatbot': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/integrations': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
       },
       '/health': 'http://localhost:8000',
     },

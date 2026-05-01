@@ -91,3 +91,33 @@ class EndSessionResponse(BaseModel):
     session_id: str
     ended_at: datetime
     summary_generated: bool
+
+
+# ── Voice (Sarvam STT + TTS) ─────────────────────────────────────────────
+
+
+class PatientVoiceMessageRequest(BaseModel):
+    """Audio captured from the patient's mic, sent base64-encoded."""
+    patient_id: str
+    mime_type: str = Field(default="audio/webm", max_length=80)
+    audio_base64: str = Field(..., max_length=20_000_000)
+
+
+class PatientVoiceMessageResponse(BaseModel):
+    transcript: str
+    language: Optional[str] = None
+    provider: str  # "sarvam" | "gemini" | "none"
+
+
+class PatientTTSRequest(BaseModel):
+    text: str = Field(..., max_length=4000)
+    language_code: Optional[str] = Field(default=None, max_length=10)
+    speaker: Optional[str] = Field(default=None, max_length=40)
+
+
+class PatientTTSResponse(BaseModel):
+    audio_base64: str
+    mime_type: str  # "audio/wav" or "" when synthesis skipped
+    provider: str   # "sarvam" | "none"
+    language: Optional[str] = None
+    speaker: Optional[str] = None
