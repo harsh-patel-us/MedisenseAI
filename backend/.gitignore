@@ -11,3 +11,4 @@ conversations
 .env
 *.db
 medisense.db
+tmp
