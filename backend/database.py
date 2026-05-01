@@ -1,7 +1,9 @@
 """
-database.py — SQLite async database setup via SQLAlchemy
+database.py — Async database setup via SQLAlchemy.
+Supports both PostgreSQL (Neon / Supabase) and SQLite (local dev).
 """
 import json
+import logging
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped
@@ -10,7 +12,60 @@ from typing import Optional
 
 from config import settings
 
-engine = create_async_engine(settings.database_url, echo=False)
+logger = logging.getLogger(__name__)
+
+
+# ── Build the async connection URL ───────────────────────────────────────
+def _make_async_url(raw_url: str) -> str:
+    """Convert a plain DB URL into an asyncio-compatible SQLAlchemy URL.
+
+    • ``sqlite:///...``      → ``sqlite+aiosqlite:///...``
+    • ``postgresql://...``   → ``postgresql+asyncpg://...``
+    • ``postgres://...``     → ``postgresql+asyncpg://...``   (Neon / Heroku style)
+    • Already async URLs are passed through unchanged.
+
+    Also converts ``sslmode=require`` → ``ssl=require`` because asyncpg uses
+    the ``ssl`` parameter, not ``sslmode``.
+    """
+    url = raw_url.strip()
+
+    # Already has an async driver
+    if "+asyncpg" in url or "+aiosqlite" in url:
+        # Still fix sslmode even if driver is already set
+        return url.replace("sslmode=", "ssl=")
+
+    # PostgreSQL variants
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif url.startswith("sqlite:///"):
+        # Plain SQLite
+        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+
+    # asyncpg uses `ssl=` not `sslmode=`
+    url = url.replace("sslmode=", "ssl=")
+
+    return url
+
+
+_async_url = _make_async_url(settings.database_url)
+_is_postgres = "postgresql" in _async_url or "postgres" in _async_url
+
+# Connection arguments
+_connect_args: dict = {}
+if not _is_postgres:
+    # SQLite-specific: allow multi-threaded access for dev
+    _connect_args = {"check_same_thread": False}
+
+engine = create_async_engine(
+    _async_url,
+    echo=False,
+    connect_args=_connect_args,
+    # Connection pool settings suitable for serverless (Vercel) and dev
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -186,15 +241,19 @@ class PatientChatAudit(Base):
 
 
 async def init_db():
-    """Create all tables on startup, and add newly introduced columns to
-    pre-existing tables. SQLite won't ALTER an existing table via create_all,
-    so we issue idempotent ADD COLUMN statements for the schema upgrade."""
-    from sqlalchemy import text
+    """Create all tables. For existing databases, add any newly-introduced
+    columns in an idempotent manner that works across both SQLite and PostgreSQL."""
+    from sqlalchemy import text, inspect
 
     async with engine.begin() as conn:
+        # Create tables that don't exist yet
         await conn.run_sync(Base.metadata.create_all)
 
-        new_columns = {
+        # ── Idempotent column additions (works on both SQLite & PostgreSQL) ──
+        # For each table, define columns that may have been added after the
+        # initial schema. We introspect the live table to avoid duplicate
+        # ADD COLUMN errors.
+        new_columns: dict[str, list[tuple[str, str]]] = {
             "consultation_sessions": [
                 ("doctor_id", "VARCHAR"),
                 ("patient_name", "VARCHAR"),
@@ -225,19 +284,38 @@ async def init_db():
                 ("google_email", "VARCHAR"),
                 ("google_refresh_token", "TEXT"),
                 ("google_access_token", "TEXT"),
-                ("google_token_expiry", "DATETIME"),
+                ("google_token_expiry", "TIMESTAMP"),
                 ("google_scopes", "TEXT"),
             ],
         }
 
+        def _get_existing_columns(sync_conn):
+            """Use SQLAlchemy Inspector to get column names — works on all backends."""
+            insp = inspect(sync_conn)
+            result = {}
+            for table_name in new_columns:
+                try:
+                    cols = insp.get_columns(table_name)
+                    result[table_name] = {c["name"] for c in cols}
+                except Exception:
+                    result[table_name] = set()
+            return result
+
+        existing = await conn.run_sync(_get_existing_columns)
+
         for table, cols in new_columns.items():
-            existing_cols_result = await conn.execute(text(f"PRAGMA table_info({table})"))
-            existing_cols = {row[1] for row in existing_cols_result.fetchall()}
+            table_cols = existing.get(table, set())
             for col_name, col_type in cols:
-                if col_name not in existing_cols:
-                    await conn.execute(
-                        text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
-                    )
+                if col_name not in table_cols:
+                    try:
+                        await conn.execute(
+                            text(f'ALTER TABLE "{table}" ADD COLUMN "{col_name}" {col_type}')
+                        )
+                        logger.info(f"Added column {table}.{col_name}")
+                    except Exception as e:
+                        # Column may already exist (race, or type mismatch with
+                        # introspection cache). Log and continue.
+                        logger.debug(f"Skipping {table}.{col_name}: {e}")
 
 
 async def get_db():
