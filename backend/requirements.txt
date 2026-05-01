@@ -25,11 +25,6 @@ aiosqlite>=0.20.0             # Async SQLite driver
 pymupdf>=1.23.0               # PDF text extraction (fitz)
 pillow>=10.0.0                # Image processing for OCR
 
-# ── OCR ────────────────────────────────────────────────────────────────────
-pytesseract>=0.3.10           # Tesseract OCR wrapper
-# Note: Tesseract binary must be installed separately on Windows:
-# Download from: https://github.com/UB-Mannheim/tesseract/wiki
-
 # ── PDF export ─────────────────────────────────────────────────────────────
 reportlab>=4.0.0              # Generate branded PDF reports
 

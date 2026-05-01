@@ -119,18 +119,23 @@ MediSense AI is a **multi-sided AI health platform**:
 │                                                                   │
 │  Auth (JWT) ─── Doctor ─── Patient ─── Consultation               │
 │  Chatbot Widget ─── Patient Chatbot (Dr. MediSense)               │
+│  Meet ─── Google OAuth ─── Google Calendar                        │
 │                                                                   │
 │  Services: claude_service, transcription, diarization, ner,       │
 │           report_parser, pdf_export, auth_service,                │
-│           chatbot_agent, patient_chatbot                          │
+│           chatbot_agent, patient_chatbot, google_calendar,        │
+│           sarvam_stt_service, sarvam_tts_service                  │
 │                                                                   │
+│  Prompts: prompts/*.txt (9 prompt files loaded at import)         │
 │  Database: SQLite + SQLAlchemy async (7 tables)                   │
 └───────────────────────────────┬───────────────────────────────────┘
                                 │
-                    ┌───────────▼───────────┐
-                    │    OpenRouter API     │
-                    │  (openai/gpt-4o-mini) │
-                    └──────────────────────┘
+              ┌─────────────────┼─────────────────┐
+              │                 │                 │
+    ┌─────────▼──────┐  ┌──────▼───────┐  ┌──────▼──────┐
+    │  OpenRouter API │  │  Sarvam AI   │  │  Google     │
+    │  (gpt-4o-mini)  │  │  (STT/TTS)   │  │  Calendar   │
+    └────────────────┘  └──────────────┘  └─────────────┘
 ```
 
 ---
@@ -143,15 +148,18 @@ MediSense AI is a **multi-sided AI health platform**:
 | Python 3.11+ | Primary language |
 | FastAPI | REST API + WebSockets |
 | Uvicorn | ASGI server |
-| OpenAI SDK | LLM calls via OpenRouter |
-| pyannote.audio | Speaker diarization |
-| scispaCy | Medical NER |
+| OpenAI SDK | LLM calls via OpenRouter (all AI) |
+| OpenAI Agents SDK | Multi-agent chatbot orchestration |
+| Sarvam AI SDK | Indic STT (saaras:v3) + TTS (bulbul:v3) |
 | PyMuPDF (fitz) | PDF text extraction |
-| pytesseract | OCR for scanned images |
+| Pillow | Image processing for vision OCR pipeline |
 | ReportLab | PDF generation |
 | SQLAlchemy (async) | ORM with SQLite |
 | bcrypt + PyJWT | Authentication |
-| pydantic-settings | Configuration |
+| pydantic-settings | Configuration from .env |
+| Google API Client | Calendar + Meet integration |
+
+> **No local models**: Diarization uses pause-based heuristics, NER uses regex, OCR uses OpenRouter vision models. Nothing is downloaded or run locally.
 
 ### Frontend
 | Tool | Purpose |
@@ -171,33 +179,51 @@ MediSense AI is a **multi-sided AI health platform**:
 MediSenseAI/
 ├── backend/
 │   ├── main.py                        # FastAPI app + lifespan + CORS
-│   ├── config.py                      # Settings + 6 AI prompts + safety message
+│   ├── config.py                      # Settings loaded from .env (no prompts)
 │   ├── database.py                    # 7 ORM models + init_db with migrations
 │   ├── requirements.txt
-│   ├── .env
+│   ├── .env                           # All env vars (not committed to git)
+│   ├── prompts/                       # AI prompt templates (plain-text files)
+│   │   ├── __init__.py                # Loader — reads .txt, exports constants
+│   │   ├── soap_note.txt              # SOAP note generation
+│   │   ├── report_analysis.txt        # Medical report analysis
+│   │   ├── summary_specialist.txt     # Summary + specialist routing
+│   │   ├── lifestyle_guide.txt        # Diet/exercise/precautions
+│   │   ├── patient_explanation.txt    # Post-call patient guide
+│   │   ├── patient_chatbot_system.txt # Dr. MediSense system prompt
+│   │   ├── patient_chatbot_summary.txt # Session summary prompt
+│   │   ├── chatbot_system.txt         # Website chatbot prompt
+│   │   └── safety_system.txt          # Safety guardrails
 │   ├── routers/
 │   │   ├── auth.py                    # POST /auth/register, /auth/login, GET /auth/me
 │   │   ├── doctor.py                  # WS /doctor/stream-audio, POST /doctor/generate-note, /doctor/export-pdf
 │   │   ├── patient.py                 # POST /patient/upload, /patient/analyze, /patient/export-pdf
 │   │   ├── consultation.py            # Consultation rooms, WebRTC, post-call
 │   │   ├── chatbot.py                 # POST /chatbot/message
-│   │   └── patient_chatbot.py         # Full CRUD for Dr. MediSense sessions + messages
+│   │   ├── patient_chatbot.py         # Dr. MediSense sessions + messages + voice
+│   │   ├── meet.py                    # Google Meet transcript processing
+│   │   └── google_oauth.py            # Google Calendar OAuth flow
 │   ├── services/
-│   │   ├── claude_service.py          # All LLM calls via OpenRouter
-│   │   ├── transcription.py           # STT (Gemini Flash)
-│   │   ├── diarization.py             # pyannote.audio speaker labeling
-│   │   ├── ner.py                     # scispaCy NER + regex fallback
-│   │   ├── report_parser.py           # PyMuPDF + Tesseract OCR
+│   │   ├── claude_service.py          # All LLM calls via OpenRouter + vision OCR
+│   │   ├── transcription.py           # STT (Gemini Flash via OpenRouter)
+│   │   ├── diarization.py             # Speaker labeling (pause-based heuristic)
+│   │   ├── ner.py                     # Medical NER (regex keyword matching)
+│   │   ├── report_parser.py           # PyMuPDF + OpenRouter vision OCR
 │   │   ├── pdf_export.py              # ReportLab PDF generation
 │   │   ├── auth_service.py            # bcrypt hashing + JWT
-│   │   ├── chatbot_agent.py           # Website chatbot agent
-│   │   └── patient_chatbot.py         # Dr. MediSense memory + agent
+│   │   ├── chatbot_agent.py           # Website chatbot multi-agent system
+│   │   ├── patient_chatbot.py         # Dr. MediSense memory + agent
+│   │   ├── google_calendar.py         # Google Calendar + Meet link creation
+│   │   ├── sarvam_stt_service.py      # Sarvam AI speech-to-text
+│   │   └── sarvam_tts_service.py      # Sarvam AI text-to-speech
 │   ├── models/
 │   │   ├── auth_models.py
 │   │   ├── doctor_models.py
 │   │   ├── patient_models.py
 │   │   ├── chatbot_models.py
 │   │   └── patient_chatbot_models.py
+│   ├── scripts/
+│   │   └── setup_google_calendar.py   # One-time Google OAuth setup
 │   └── utils/
 │       ├── helpers.py
 │       └── storage.py
@@ -244,11 +270,11 @@ MediSenseAI/
 ```
 Browser Mic → AudioChunks → WebSocket → Gemini Flash STT → Raw Transcript
                                                     ↓
-                                      pyannote.audio Diarization
+                                      Pause-Based Speaker Diarization
                                                     ↓
                                       Labeled Transcript (DOCTOR/PATIENT)
                                                     ↓
-                                      scispaCy Medical NER
+                                      Regex Medical NER
                                                     ↓
                                       AI (Prompt 1) → SOAP Note JSON
                                                     ↓
@@ -260,7 +286,7 @@ Browser Mic → AudioChunks → WebSocket → Gemini Flash STT → Raw Transcrip
 ```
 File Upload (PDF/Image)
         ↓
-PyMuPDF (text PDF) or Tesseract OCR (scanned/image)
+PyMuPDF (text PDF) or OpenRouter Vision OCR (scanned/image)
         ↓
 Raw Text Extracted
         ↓
@@ -368,19 +394,19 @@ GET   /          →  { message, docs, health }
 
 ## 9. AI Prompts
 
-All prompts live in `config.py`. Summary:
+All prompts live in the `prompts/` folder as plain-text `.txt` files. They are loaded at import time by `prompts/__init__.py` and exported as Python constants. Import them via `from prompts import SOAP_NOTE_PROMPT`.
 
-| # | Name | Used By | Purpose |
-|---|------|---------|---------|
-| 1 | `SOAP_NOTE_PROMPT` | Doctor/Consultation | Generate structured SOAP note from transcript + entities |
-| 2 | `REPORT_ANALYSIS_PROMPT` | Patient | Extract findings from any medical report type |
-| 3 | `SUMMARY_SPECIALIST_PROMPT` | Patient | Plain-language summary + specialist routing |
-| 4 | `LIFESTYLE_GUIDE_PROMPT` | Patient | Diet, exercise, precautions tailored to conditions |
-| 5 | `PATIENT_EXPLANATION_PROMPT` | Consultation | Post-call patient-friendly explanation of SOAP note |
-| 6 | `PATIENT_CHATBOT_SYSTEM_PROMPT` | Dr. MediSense | System prompt with patient profile + memory injection |
-| — | `PATIENT_CHATBOT_SUMMARY_PROMPT` | Dr. MediSense | Auto-summarize chat sessions for future memory |
-| — | `CHATBOT_SYSTEM_PROMPT` | Website widget | Visitor-facing support chatbot personality |
-| — | `SAFETY_SYSTEM_MESSAGE` | All AI calls | Medical safety guardrails prepended to every call |
+| # | File | Constant | Used By | Purpose |
+|---|------|----------|---------|---------|
+| 1 | `soap_note.txt` | `SOAP_NOTE_PROMPT` | Doctor/Consultation | Generate structured SOAP note from transcript + entities |
+| 2 | `report_analysis.txt` | `REPORT_ANALYSIS_PROMPT` | Patient | Extract findings from any medical report type |
+| 3 | `summary_specialist.txt` | `SUMMARY_SPECIALIST_PROMPT` | Patient | Plain-language summary + specialist routing |
+| 4 | `lifestyle_guide.txt` | `LIFESTYLE_GUIDE_PROMPT` | Patient | Diet, exercise, precautions tailored to conditions |
+| 5 | `patient_explanation.txt` | `PATIENT_EXPLANATION_PROMPT` | Consultation | Post-call patient-friendly explanation of SOAP note |
+| 6 | `patient_chatbot_system.txt` | `PATIENT_CHATBOT_SYSTEM_PROMPT` | Dr. MediSense | System prompt with patient profile + memory injection |
+| 7 | `patient_chatbot_summary.txt` | `PATIENT_CHATBOT_SUMMARY_PROMPT` | Dr. MediSense | Auto-summarize chat sessions for future memory |
+| 8 | `chatbot_system.txt` | `CHATBOT_SYSTEM_PROMPT` | Website widget | Visitor-facing support chatbot personality |
+| 9 | `safety_system.txt` | `SAFETY_SYSTEM_MESSAGE` | All AI calls | Medical safety guardrails prepended to every call |
 
 ---
 
@@ -481,34 +507,55 @@ CREATE TABLE patient_chat_audit (
 Create `/backend/.env`:
 
 ```env
-# OpenRouter API
+# ── OpenRouter / LLM
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 AI_MODEL=openai/gpt-4o-mini
+CHATBOT_MODEL=openai/gpt-4o-mini
+PATIENT_CHATBOT_MODEL=openai/gpt-4o-mini
+PATIENT_CHATBOT_SUMMARY_EVERY=10
+VISION_MODEL=openai/gpt-4o-mini
 MEDICAL_MODEL=openai/gpt-4o-mini
 
-# App
+# ── App
 APP_HOST=127.0.0.1
 APP_PORT=8000
 ENVIRONMENT=development
 
-# File upload
+# ── File upload
 UPLOAD_DIR=./tmp/medisense_uploads
 MAX_FILE_SIZE_MB=20
+ALLOWED_FILE_TYPES=application/pdf,image/jpeg,image/png
 
-# STT model
+# ── STT model
 WHISPER_MODEL=google/gemini-2.5-flash
 
-# Database
+# ── Database
 DATABASE_URL=sqlite+aiosqlite:///./medisense.db
-
-# CORS
 FRONTEND_URL=http://localhost:5173
 
-# Optional
-# HF_TOKEN=hf_...          # pyannote.audio diarization
-# TESSERACT_CMD=...         # Windows tesseract path
-# JWT_SECRET=...            # Override for production
+# ── Auth / JWT
+JWT_SECRET=<256-bit-hex-secret>
+JWT_ALGORITHM=HS256
+JWT_EXPIRES_MINUTES=10080
+
+# ── Google Calendar OAuth
+GOOGLE_CLIENT_ID=<from-google-cloud-console>
+GOOGLE_CLIENT_SECRET=<from-google-cloud-console>
+GOOGLE_REDIRECT_URI=http://localhost:8000/integrations/google/callback
+GOOGLE_POST_AUTH_REDIRECT=http://localhost:5173/consultation/schedule
+GOOGLE_REFRESH_TOKEN=<from-setup-script>
+GOOGLE_CALENDAR_EMAIL=<email>
+GOOGLE_MEET_WEBHOOK_SECRET=<256-bit-hex-secret>
+
+# ── Sarvam AI (Indic STT/TTS) — leave empty to fall back to Gemini Flash
+SARVAM_API_KEY=
+SARVAM_STT_MODEL=saaras:v3
+SARVAM_TTS_MODEL=bulbul:v3
+SARVAM_BASE_URL=https://api.sarvam.ai
+SARVAM_WS_BASE_URL=wss://api.sarvam.ai
+SARVAM_TTS_SPEAKER=anushka
+SARVAM_TTS_LANGUAGE=en-IN
 ```
 
 ---
@@ -603,7 +650,7 @@ It is NOT a substitute for professional medical advice, diagnosis, or treatment.
 Always consult a qualified healthcare provider before making any health decisions.
 ```
 
-### Safety Rules (enforced via SAFETY_SYSTEM_MESSAGE in config.py)
+### Safety Rules (enforced via SAFETY_SYSTEM_MESSAGE in prompts/safety_system.txt)
 1. Never make definitive diagnoses — use "suggests", "may indicate"
 2. Never recommend specific drug doses
 3. Never contradict existing prescriptions
