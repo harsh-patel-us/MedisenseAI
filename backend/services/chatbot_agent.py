@@ -28,7 +28,8 @@ from agents import (
 )
 from openai import AsyncOpenAI
 
-from config import CHATBOT_SYSTEM_PROMPT, settings
+from config import settings
+from prompts import CHATBOT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 

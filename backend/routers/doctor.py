@@ -66,7 +66,7 @@ async def stream_audio(websocket: WebSocket):
                     try:
                         result = await transcribe_audio(chunk, settings.whisper_model)
                         segments = result.get("segments", [])
-                        labeled = diarize(chunk, segments, settings.hf_token)
+                        labeled = diarize(chunk, segments)
 
                         for seg in labeled:
                             accumulated_text.append(seg)
@@ -88,7 +88,7 @@ async def stream_audio(websocket: WebSocket):
                         try:
                             result = await transcribe_audio(remaining, settings.whisper_model)
                             segments = result.get("segments", [])
-                            labeled = diarize(remaining, segments, settings.hf_token)
+                            labeled = diarize(remaining, segments)
                             for seg in labeled:
                                 accumulated_text.append(seg)
                                 await websocket.send_json({"type": "transcript_segment", "data": seg})

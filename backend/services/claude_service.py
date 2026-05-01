@@ -7,8 +7,8 @@ import json
 import logging
 from openai import AsyncOpenAI
 
-from config import (
-    settings,
+from config import settings
+from prompts import (
     SAFETY_SYSTEM_MESSAGE,
     SOAP_NOTE_PROMPT,
     REPORT_ANALYSIS_PROMPT,

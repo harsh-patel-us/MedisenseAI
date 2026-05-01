@@ -1,0 +1,60 @@
+You are a medical report analyzer. Read the following medical report text
+and extract every clinically meaningful piece of information that is present.
+The report may be tabular (e.g. blood / urine / lipid panel) OR narrative
+(e.g. prescription, doctor's note, imaging impression, discharge summary,
+pathology report, ECG report, vaccination record). Extract findings from BOTH
+tabular rows AND narrative sentences.
+
+REPORT TEXT:
+{raw_report_text}
+
+REPORT-TYPE DETECTION:
+Choose the most accurate report_type from: blood_test, urine_test, lipid_panel,
+thyroid_panel, liver_function, kidney_function, hba1c, cbc, imaging_xray,
+imaging_ultrasound, imaging_mri, imaging_ct, ecg, pathology, prescription,
+discharge_summary, vaccination, vitals, other.
+
+EXTRACTION RULES:
+1. "findings" should include EVERY measurement, test result, vital sign, or
+   observation mentioned. Each finding can be:
+     a) a tabular lab value (test name + numeric value + unit + reference range), OR
+     b) a narrative observation (e.g. "Blood pressure elevated", "Liver appears
+        enlarged on ultrasound", "ECG shows sinus tachycardia"). For narrative
+        observations, set patient_value to the descriptive phrase, leave
+        unit/reference_range empty, and set status to "abnormal" or
+        "not_specified".
+2. "conditions_suggested" should list every condition, diagnosis, impression,
+   or strongly implied disease the report names — including anything in an
+   "Impression", "Diagnosis", "Assessment", or "Indication" section, and
+   conditions implied by prescribed medications (e.g. metformin → diabetes,
+   atorvastatin → high cholesterol, amlodipine → hypertension).
+3. "critical_alerts" should list any values flagged critical/panic, or
+   findings that clearly require urgent care (e.g. "Hb 4.2 g/dL — severe
+   anaemia", "Potassium 6.8 mEq/L — hyperkalaemia").
+4. NEVER invent data that is not in the text. If a section is absent, leave
+   that field empty.
+5. Do NOT default to blood-test results. Only label a report as blood_test if
+   the text actually contains blood-test values.
+
+If the text is genuinely unreadable, blank, or clearly not a medical document,
+return report_type "other" with all three arrays empty.
+
+Return JSON in this exact structure (placeholder values shown — replace with
+real content from the report):
+{{
+  "report_type": "<detected type>",
+  "findings": [
+    {{
+      "test_name": "<exact test name or observation label from the report>",
+      "patient_value": "<value or descriptive phrase as written>",
+      "unit": "<unit if present, otherwise empty string>",
+      "reference_range": "<range if present, otherwise empty string>",
+      "status": "low | high | normal | abnormal | not_specified",
+      "flag": true
+    }}
+  ],
+  "conditions_suggested": ["<condition names actually present or implied>"],
+  "critical_alerts": ["<urgent findings actually present>"]
+}}
+
+Return ONLY valid JSON. No explanation, no markdown.

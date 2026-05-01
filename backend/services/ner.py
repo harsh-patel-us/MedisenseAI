@@ -1,7 +1,9 @@
 """
-ner.py — Medical Named Entity Recognition
-Primary: scispaCy (en_core_sci_sm model)
-Fallback: Regex-based keyword extraction
+ner.py — Medical Named Entity Recognition (regex-based)
+
+Pure regex keyword matching for extracting symptoms, medications,
+diagnoses, and vitals from consultation transcripts. No local models
+are downloaded or loaded — all pattern matching runs on plain Python regex.
 """
 import re
 import logging
@@ -9,7 +11,7 @@ from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
-# ── Regex keyword lists for fallback ──────────────────────────────────────
+# ── Regex keyword lists ───────────────────────────────────────────────────
 SYMPTOM_KEYWORDS = [
     r"\bpain\b", r"\bache\b", r"\bfever\b", r"\bcough\b", r"\bdyspnea\b",
     r"\bshortness of breath\b", r"\bnausea\b", r"\bvomiting\b", r"\bdizziness\b",
@@ -48,8 +50,11 @@ def _regex_extract(text: str, patterns: list) -> List[str]:
     return sorted(found)
 
 
-def extract_entities_regex(text: str) -> Dict[str, List[str]]:
-    """Pure regex-based medical entity extraction — no model needed."""
+def extract_medical_entities(text: str) -> Dict[str, List[str]]:
+    """Extract medical entities using regex keyword matching.
+
+    Returns dict with keys: symptoms, medications, diagnoses, vitals, allergies.
+    """
     vitals = [m.group(0).strip() for m in VITALS_PATTERN.finditer(text)]
     return {
         "symptoms": _regex_extract(text, SYMPTOM_KEYWORDS),
@@ -58,42 +63,3 @@ def extract_entities_regex(text: str) -> Dict[str, List[str]]:
         "vitals": vitals,
         "allergies": [],
     }
-
-
-def extract_entities_scispacy(text: str) -> Dict[str, List[str]]:
-    """scispaCy-based entity extraction using en_core_sci_sm model."""
-    try:
-        import spacy
-        nlp = spacy.load("en_core_sci_sm")
-        doc = nlp(text)
-
-        entities = {"symptoms": [], "medications": [], "diagnoses": [], "vitals": [], "allergies": []}
-        for ent in doc.ents:
-            label = ent.label_.lower()
-            txt = ent.text.strip()
-            if label in ("disease_or_syndrome", "sign_or_symptom", "pathologic_function"):
-                entities["symptoms"].append(txt)
-            elif label in ("pharmacologic_substance", "clinical_drug"):
-                entities["medications"].append(txt)
-            elif label in ("disease_or_syndrome", "neoplastic_process"):
-                entities["diagnoses"].append(txt)
-
-        # Deduplicate
-        for key in entities:
-            entities[key] = list(set(entities[key]))
-
-        # Also get vitals via regex
-        entities["vitals"] = [m.group(0).strip() for m in VITALS_PATTERN.finditer(text)]
-        return entities
-
-    except OSError:
-        logger.warning("scispaCy model en_core_sci_sm not found — using regex fallback")
-        return extract_entities_regex(text)
-    except ImportError:
-        logger.warning("scispaCy not installed — using regex fallback")
-        return extract_entities_regex(text)
-
-
-def extract_medical_entities(text: str) -> Dict[str, List[str]]:
-    """Main entrypoint — tries scispaCy, falls back to regex."""
-    return extract_entities_scispacy(text)

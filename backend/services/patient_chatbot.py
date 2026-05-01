@@ -37,10 +37,10 @@ from openai import AsyncOpenAI
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import (
+from config import settings
+from prompts import (
     PATIENT_CHATBOT_SUMMARY_PROMPT,
     PATIENT_CHATBOT_SYSTEM_PROMPT,
-    settings,
 )
 from database import PatientAnalysisRecord, PatientChatSession, User
 from services.claude_service import get_client
