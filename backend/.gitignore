@@ -12,3 +12,4 @@ conversations
 *.db
 medisense.db
 tmp
+.vercel

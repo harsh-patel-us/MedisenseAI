@@ -57,6 +57,10 @@ app.add_middleware(
         settings.frontend_url,
         "http://localhost:5173",
         "http://localhost:3000",
+        # Vercel production aliases
+        "https://medisense-ai-zeta.vercel.app",
+        "https://medisense-ai-harshpatel-6002s-projects.vercel.app",
+        "https://medisense-ai-harshpatel-6002-harshpatel-6002s-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],

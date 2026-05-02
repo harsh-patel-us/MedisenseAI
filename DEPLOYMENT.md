@@ -182,7 +182,7 @@ vercel
 #   - Which scope? → Your account
 #   - Link to existing project? → No (first time)
 #   - Project name? → medisense-api
-#   - Directory? → ./
+#   - Directory? → (just press Enter to accept the default)
 #   - Override settings? → No
 
 # Deploy to production
