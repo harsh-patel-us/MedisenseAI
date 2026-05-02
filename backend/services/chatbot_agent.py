@@ -208,7 +208,7 @@ def get_triage_agent() -> Agent:
         return _triage_agent
 
     platform_agent = Agent(
-        name="Platform Support",
+        name="Platform_Support",
         handoff_description="Knows MediSense AI product features, pricing, integrations, security, and how to use the doctor / patient flows.",
         instructions=PLATFORM_AGENT_INSTRUCTIONS,
         tools=[lookup_feature],
@@ -216,7 +216,7 @@ def get_triage_agent() -> Agent:
     )
 
     health_agent = Agent(
-        name="Health Info",
+        name="Health_Info",
         handoff_description="Answers general health and biology questions and recommends the right specialist.",
         instructions=HEALTH_AGENT_INSTRUCTIONS,
         tools=[find_specialist],
