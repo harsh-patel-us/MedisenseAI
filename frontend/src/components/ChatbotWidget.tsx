@@ -685,7 +685,7 @@ export default function ChatbotWidget() {
                 }}
               />
               {/* Attachment (decorative) */}
-              <button
+              {/* <button
                 type="button"
                 aria-label="Attach (coming soon)"
                 disabled
@@ -706,7 +706,7 @@ export default function ChatbotWidget() {
                 tabIndex={-1}
               >
                 <PaperclipIcon size={18} />
-              </button>
+              </button> */}
               {/* Send button (inside the field) */}
               <button
                 type="submit"
