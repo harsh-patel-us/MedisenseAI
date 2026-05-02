@@ -47,6 +47,16 @@ export async function getPatientChatSession(
   return data;
 }
 
+/** Fetch the raw bytes of an in-chat attachment as a Blob (for re-download
+ *  or preview). Owner-scoped on the backend. */
+export async function getChatAttachment(attachmentId: string): Promise<Blob> {
+  const response = await axios.get(
+    `${API_BASE}/patient/chat/attachment/${encodeURIComponent(attachmentId)}`,
+    { responseType: 'blob' },
+  );
+  return response.data;
+}
+
 export async function endPatientChatSession(
   patientId: string,
   sessionId: string,

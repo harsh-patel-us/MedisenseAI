@@ -6,6 +6,9 @@ export interface ChatFileReference {
   mime_type: string;
   size_bytes: number;
   kind: PatientAttachmentKind;
+  /** Server-assigned id of the persisted attachment row. Absent on optimistic
+   *  client-side refs (set by the server once the message is committed). */
+  attachment_id?: string;
 }
 
 export interface ChatAttachmentUpload {

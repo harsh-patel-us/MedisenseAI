@@ -1,33 +1,47 @@
 """
 patient.py — Patient-side API router
-POST /patient/upload     → parse file, extract text
-POST /patient/analyze    → run 3 AI prompts, return full analysis
-POST /patient/export-pdf → generate downloadable health guide PDF
+POST /patient/upload                  → parse file, extract text
+POST /patient/analyze                 → run 3 AI prompts, return full analysis
+POST /patient/export-pdf              → generate downloadable health guide PDF
+GET  /patient/history                 → list this patient's past analyses
+GET  /patient/history/{id}            → full analysis for one record
+GET  /patient/history/{id}/file       → download the original uploaded file
+GET  /patient/history/{id}/pdf        → download the AI-generated PDF
 """
 import json
 import logging
+from urllib.parse import quote
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from fastapi.responses import StreamingResponse, Response
-import io
+from fastapi.responses import Response
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from models.patient_models import UploadResponse, AnalyzeRequest, PatientAnalysis, ExportPdfRequest
+from models.patient_models import (
+    UploadResponse,
+    AnalyzeRequest,
+    PatientAnalysis,
+    ExportPdfRequest,
+    HistoryItem,
+    HistoryListResponse,
+    HistoryDetail,
+)
 from services.report_parser import parse_uploaded_file, looks_like_extraction_failure
 from services.claude_service import analyze_report, generate_summary_and_specialists, generate_lifestyle_guide
 from services.pdf_export import generate_patient_pdf
 from services.auth_service import require_role
 from utils.helpers import generate_id, validate_file_type, validate_file_size, safe_filename
-from utils.storage import save_patient_upload, save_patient_pdf
 from database import get_db, PatientAnalysisRecord, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/patient", tags=["patient"])
 
-# In-memory store for uploaded raw text (keyed by file_id)
-# Persisted to disk via utils.storage and linked through PatientAnalysisRecord.
+# In-memory store for uploaded bytes + extracted text, keyed by file_id.
+# This is short-lived: /upload populates it, /analyze drains it into the DB.
+# Files are persisted as BYTEA/BLOB on PatientAnalysisRecord — nothing is
+# written to the local filesystem.
 _upload_cache: dict[str, dict] = {}
 
 
@@ -68,15 +82,13 @@ async def upload_report(
     # Extract text (vision-OCR fallback runs inside parse_uploaded_file)
     raw_text = await parse_uploaded_file(content, content_type, filename)
 
-    # Persist the raw upload so the record survives restarts.
+    # Hold the bytes in memory until /analyze persists them on the DB record.
     file_id = generate_id()
-    stored_path = save_patient_upload(file_id, content, filename, content_type)
-
     _upload_cache[file_id] = {
         "raw_text": raw_text,
         "file_name": filename,
         "file_type": content_type,
-        "file_path": stored_path,
+        "file_bytes": content,
         "file_size": len(content),
     }
 
@@ -161,7 +173,7 @@ async def analyze_patient_report(
             patient_id=_user.id,
             file_name=upload_meta.get("file_name", ""),
             file_type=upload_meta.get("file_type", ""),
-            uploaded_file_path=upload_meta.get("file_path"),
+            uploaded_file_data=upload_meta.get("file_bytes"),
             uploaded_file_size=upload_meta.get("file_size"),
             raw_text=raw_text[:5000],  # Truncate for storage
             findings=json.dumps(findings_data.get("findings", [])),
@@ -174,6 +186,9 @@ async def analyze_patient_report(
         )
         db.add(record)
         await db.commit()
+
+        # Bytes are now safe in the DB; drop the in-memory copy.
+        _upload_cache.pop(request.file_id, None)
 
         return analysis
 
@@ -201,23 +216,24 @@ async def export_patient_pdf(
     if not pdf_bytes:
         raise HTTPException(status_code=500, detail="PDF generation failed. Ensure reportlab is installed.")
 
-    # Persist PDF + path on the analysis record when we can identify it.
+    # Persist PDF bytes onto the analysis record when we can identify it. The
+    # PDF lives in the DB so patients can re-download it from /history later.
     record_id = getattr(request, "file_id", None) or getattr(request, "analysis_id", None)
-    try:
-        target_id = record_id or generate_id()
-        pdf_path = save_patient_pdf(target_id, pdf_bytes)
-
-        if record_id:
+    if record_id:
+        try:
             result = await db.execute(
-                select(PatientAnalysisRecord).where(PatientAnalysisRecord.id == record_id)
+                select(PatientAnalysisRecord).where(
+                    PatientAnalysisRecord.id == record_id,
+                    PatientAnalysisRecord.patient_id == _user.id,
+                )
             )
             record = result.scalar_one_or_none()
             if record is not None:
-                record.generated_pdf_path = pdf_path
+                record.generated_pdf_data = pdf_bytes
                 record.generated_pdf_size = len(pdf_bytes)
                 await db.commit()
-    except Exception as exc:
-        logger.warning(f"Could not persist patient PDF: {exc}")
+        except Exception as exc:
+            logger.warning(f"Could not persist patient PDF: {exc}")
 
     return Response(
         content=pdf_bytes,
@@ -225,5 +241,143 @@ async def export_patient_pdf(
         headers={
             "Content-Disposition": f'attachment; filename="medisense_health_guide.pdf"',
             "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+# ── Patient history ───────────────────────────────────────────────────────
+
+def _safe_text(value: str | None) -> str:
+    return value or ""
+
+
+def _parse_specialists(raw: str | None) -> list[dict]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+@router.get("/history", response_model=HistoryListResponse)
+async def list_patient_history(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """List every analysis this patient has ever uploaded, newest first."""
+    result = await db.execute(
+        select(PatientAnalysisRecord)
+        .where(PatientAnalysisRecord.patient_id == _user.id)
+        .order_by(PatientAnalysisRecord.created_at.desc())
+    )
+    records = result.scalars().all()
+
+    items: list[HistoryItem] = []
+    for r in records:
+        items.append(
+            HistoryItem(
+                id=r.id,
+                created_at=r.created_at.isoformat() if r.created_at else "",
+                file_name=_safe_text(r.file_name),
+                file_type=_safe_text(r.file_type),
+                file_size=r.uploaded_file_size,
+                summary=_safe_text(r.summary),
+                urgency=_safe_text(r.urgency),
+                has_uploaded_file=r.uploaded_file_data is not None,
+                has_generated_pdf=r.generated_pdf_data is not None,
+                generated_pdf_size=r.generated_pdf_size,
+            )
+        )
+
+    return HistoryListResponse(patient_id=_user.id, items=items)
+
+
+async def _load_owned_record(
+    record_id: str, user_id: str, db: AsyncSession
+) -> PatientAnalysisRecord:
+    result = await db.execute(
+        select(PatientAnalysisRecord).where(
+            PatientAnalysisRecord.id == record_id,
+            PatientAnalysisRecord.patient_id == user_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return record
+
+
+@router.get("/history/{record_id}", response_model=HistoryDetail)
+async def get_patient_history_item(
+    record_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Full detail for one past analysis — used to re-render the tab UI."""
+    record = await _load_owned_record(record_id, _user.id, db)
+
+    return HistoryDetail(
+        id=record.id,
+        created_at=record.created_at.isoformat() if record.created_at else "",
+        file_name=_safe_text(record.file_name),
+        file_type=_safe_text(record.file_type),
+        file_size=record.uploaded_file_size,
+        summary=_safe_text(record.summary),
+        urgency=_safe_text(record.urgency),
+        findings=json.loads(record.findings) if record.findings else [],
+        specialists=_parse_specialists(record.specialists),
+        diet_plan=json.loads(record.diet_plan) if record.diet_plan else {},
+        exercise_plan=json.loads(record.exercise_plan) if record.exercise_plan else [],
+        precautions=json.loads(record.precautions) if record.precautions else {},
+        has_uploaded_file=record.uploaded_file_data is not None,
+        has_generated_pdf=record.generated_pdf_data is not None,
+        generated_pdf_size=record.generated_pdf_size,
+    )
+
+
+@router.get("/history/{record_id}/file")
+async def download_history_upload(
+    record_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Stream the original file the patient uploaded back to the browser."""
+    record = await _load_owned_record(record_id, _user.id, db)
+    if not record.uploaded_file_data:
+        raise HTTPException(status_code=404, detail="Original file not stored for this report")
+
+    filename = safe_filename(record.file_name or f"report_{record_id}")
+    return Response(
+        content=record.uploaded_file_data,
+        media_type=record.file_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Content-Length": str(len(record.uploaded_file_data)),
+        },
+    )
+
+
+@router.get("/history/{record_id}/pdf")
+async def download_history_pdf(
+    record_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Re-download the AI-generated health guide PDF from a past analysis."""
+    record = await _load_owned_record(record_id, _user.id, db)
+    if not record.generated_pdf_data:
+        raise HTTPException(
+            status_code=404,
+            detail="No generated PDF for this report yet. Open it and click Download PDF first.",
+        )
+
+    return Response(
+        content=record.generated_pdf_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="medisense_health_guide_{record_id}.pdf"',
+            "Content-Length": str(len(record.generated_pdf_data)),
         },
     )

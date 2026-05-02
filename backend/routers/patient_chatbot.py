@@ -1,21 +1,26 @@
 """
-patient_chatbot.py — Persistent patient-side chatbot ("Dr. MediSense").
+patient_chatbot.py — Persistent patient-side chatbot ("Medisense AI").
 
-POST /patient/chat/message               — send a turn (text + optional image/PDF attachments)
-GET  /patient/chat/history/{patient_id}  — list this patient's sessions
-GET  /patient/chat/session/{session_id}  — fetch one session's full transcript
-POST /patient/chat/session/end           — close a session and trigger summary generation
+POST /patient/chat/message                 — send a turn (text + optional image/PDF attachments)
+GET  /patient/chat/history/{patient_id}    — list this patient's sessions
+GET  /patient/chat/session/{session_id}    — fetch one session's full transcript
+POST /patient/chat/session/end             — close a session and trigger summary generation
+GET  /patient/chat/attachment/{att_id}     — download the raw bytes of an in-chat attachment
 
-All four endpoints require a valid JWT for the patient AND verify that the
+All endpoints require a valid JWT for the patient AND verify that the
 patient_id in the request matches the authenticated user. Every access is
-appended to `patient_chat_audit`.
+appended to `patient_chat_audit`. Uploaded files are persisted in the
+`patient_chat_attachments` table and re-injected as memory on subsequent
+turns of the same session.
 """
+import asyncio
 import base64
 import binascii
 import json
 import logging
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -25,12 +30,14 @@ from fastapi import (
     Path,
     Request,
 )
+from fastapi.responses import Response
 from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import (
     AsyncSessionLocal,
+    PatientChatAttachment,
     PatientChatAudit,
     PatientChatMessage,
     PatientChatSession,
@@ -56,12 +63,14 @@ from models.patient_chatbot_models import (
 from services.auth_service import get_current_user
 from services.patient_chatbot import (
     ChatAttachment,
+    SessionAttachmentMemo,
     generate_chat_reply,
     generate_session_summary,
 )
+from services.report_parser import parse_uploaded_file
 from services.sarvam_stt_service import transcribe as sarvam_transcribe
 from services.sarvam_tts_service import synthesize as sarvam_synthesize
-from utils.helpers import generate_id
+from utils.helpers import generate_id, safe_filename
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/patient/chat", tags=["patient-chat"])
@@ -119,7 +128,9 @@ def _decode_attachments(
     """Validate, size-check, and decode every attachment on the turn.
 
     Returns parallel lists of (runtime attachments handed to the agent,
-    persisted file references stored on the message row).
+    persisted file references stored on the message row). The reference
+    objects do NOT have an `attachment_id` yet — that is assigned later when
+    the bytes are inserted into `patient_chat_attachments`.
     """
     max_bytes = settings.max_file_size_mb * 1024 * 1024
     runtime: list[ChatAttachment] = []
@@ -184,6 +195,19 @@ def _decode_attachments(
         )
 
     return runtime, refs
+
+
+async def _safe_extract_text(att: ChatAttachment) -> str:
+    """Best-effort text extraction so we can recall this file in later turns.
+    Returns '' if extraction fails — the bytes are still saved either way."""
+    try:
+        text = await parse_uploaded_file(att.data, att.mime_type, att.filename)
+        return (text or "").strip()
+    except Exception as exc:
+        logger.warning(
+            f"Text extraction failed for chat attachment {att.filename}: {exc}"
+        )
+        return ""
 
 
 def _parse_file_refs(blob: Optional[str]) -> list[ChatFileReference]:
@@ -293,6 +317,45 @@ async def send_message(
         for m in reversed(history_rows)
     ]
 
+    # Pull attachments uploaded EARLIER in this same session so the agent can
+    # answer follow-up questions about them. Cap at 8 most recent to keep the
+    # system prompt manageable. Bytes are NOT loaded — only metadata + text.
+    prior_atts = (
+        await db.execute(
+            select(
+                PatientChatAttachment.filename,
+                PatientChatAttachment.mime_type,
+                PatientChatAttachment.kind,
+                PatientChatAttachment.created_at,
+                PatientChatAttachment.extracted_text,
+            )
+            .where(PatientChatAttachment.session_id == session.id)
+            .order_by(desc(PatientChatAttachment.created_at))
+            .limit(8)
+        )
+    ).all()
+    session_memos = [
+        SessionAttachmentMemo(
+            filename=row.filename,
+            mime_type=row.mime_type,
+            kind=row.kind,
+            created_at=row.created_at.isoformat() if row.created_at else "",
+            extracted_text=row.extracted_text or "",
+        )
+        for row in reversed(prior_atts)
+    ]
+
+    # Pre-extract text for the brand-new attachments before the agent runs so
+    # both this turn AND the persisted row have the same content. Run all
+    # extractions in parallel — each may call the vision model.
+    extracted_texts: list[str] = []
+    if runtime_attachments:
+        extracted_texts = list(
+            await asyncio.gather(
+                *(_safe_extract_text(att) for att in runtime_attachments)
+            )
+        )
+
     # Run the DrMediSense agent — context, profile, summaries, attachments
     # are all assembled inside the service.
     reply = await generate_chat_reply(
@@ -301,19 +364,52 @@ async def send_message(
         history=history,
         user_message=payload.message,
         attachments=runtime_attachments,
+        session_attachments=session_memos,
     )
 
     # Persist this turn.
     user_text = (payload.message or "").strip()
     now = datetime.utcnow()
 
+    user_message_id: Optional[str] = None
     if user_text or persisted_refs:
         # Even when the patient sends only an attachment, store a row so the
         # transcript reflects that something was sent.
         display_text = user_text or "[attachment uploaded]"
+        user_message_id = generate_id()
+
+        # Stamp every persisted ref with its attachment id up-front so the
+        # JSON we store on the message row is consistent.
+        attachment_entities: list[PatientChatAttachment] = []
+        for att, ref, text in zip(
+            runtime_attachments,
+            persisted_refs,
+            extracted_texts or [""] * len(runtime_attachments),
+        ):
+            att_id = generate_id()
+            ref.attachment_id = att_id
+            attachment_entities.append(
+                PatientChatAttachment(
+                    id=att_id,
+                    session_id=session.id,
+                    message_id=user_message_id,
+                    patient_id=user.id,
+                    filename=att.filename,
+                    mime_type=att.mime_type,
+                    size_bytes=len(att.data),
+                    kind=att.kind,
+                    file_data=att.data,
+                    extracted_text=text or None,
+                )
+            )
+
+        # Insert the message row FIRST and flush it so Postgres sees the
+        # primary key before the attachments' FK insert lands. SQLAlchemy's
+        # unit-of-work doesn't reliably topo-sort sibling INSERTs when the FK
+        # column is nullable, so we force the order ourselves.
         db.add(
             PatientChatMessage(
-                id=generate_id(),
+                id=user_message_id,
                 session_id=session.id,
                 patient_id=user.id,
                 role="user",
@@ -326,6 +422,13 @@ async def send_message(
                 ),
             )
         )
+        await db.flush()
+
+        # Attachments can now safely reference message_id.
+        for att_entity in attachment_entities:
+            db.add(att_entity)
+        if attachment_entities:
+            await db.flush()
         # First-turn title: pick the first ~60 chars of the patient's text so
         # the sidebar shows something meaningful immediately, before the
         # background summarizer has run.
@@ -625,4 +728,50 @@ async def tts(
         provider=result.provider,
         language=result.language,
         speaker=result.speaker,
+    )
+
+
+# ── GET /patient/chat/attachment/{attachment_id} ─────────────────────────
+
+
+@router.get("/attachment/{attachment_id}")
+async def download_chat_attachment(
+    attachment_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Stream the original bytes of an in-chat attachment back to the
+    browser. Restricted to the patient who uploaded it."""
+    if user.role != "patient":
+        raise HTTPException(status_code=403, detail="Patient role required.")
+
+    att = (
+        await db.execute(
+            select(PatientChatAttachment).where(
+                PatientChatAttachment.id == attachment_id,
+                PatientChatAttachment.patient_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if att is None:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+
+    await _audit(
+        db,
+        user.id,
+        action="attachment_download",
+        request=request,
+        detail=json.dumps({"attachment_id": att.id, "session_id": att.session_id}),
+    )
+    await db.commit()
+
+    filename = safe_filename(att.filename or f"attachment_{att.id}")
+    return Response(
+        content=att.file_data,
+        media_type=att.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Content-Length": str(len(att.file_data)),
+        },
     )

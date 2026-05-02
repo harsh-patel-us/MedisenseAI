@@ -69,3 +69,39 @@ export interface UploadResponse {
   file_type: string;
   char_count: number;
 }
+
+export interface HistoryItem {
+  id: string;
+  created_at: string;
+  file_name: string;
+  file_type: string;
+  file_size: number | null;
+  summary: string;
+  urgency: string;
+  has_uploaded_file: boolean;
+  has_generated_pdf: boolean;
+  generated_pdf_size: number | null;
+}
+
+export interface HistoryListResponse {
+  patient_id: string;
+  items: HistoryItem[];
+}
+
+export interface HistoryDetail {
+  id: string;
+  created_at: string;
+  file_name: string;
+  file_type: string;
+  file_size: number | null;
+  summary: string;
+  urgency: string;
+  findings: Finding[];
+  specialists: Specialist[];
+  diet_plan: DietPlan;
+  exercise_plan: ExerciseItem[];
+  precautions: Precautions;
+  has_uploaded_file: boolean;
+  has_generated_pdf: boolean;
+  generated_pdf_size: number | null;
+}

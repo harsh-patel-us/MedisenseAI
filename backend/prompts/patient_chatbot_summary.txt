@@ -1,7 +1,7 @@
 Summarise this patient-doctor chat session in ONE compact paragraph (max 80 words). Focus on:
 - The main concerns the patient raised
 - Any conditions, symptoms, medications, or test results discussed
-- The advice or guidance Dr. MediSense gave
+- The advice or guidance Medisense AI gave
 Write in third person ("The patient asked about..."). Plain text only. No headings.
 
 CONVERSATION:

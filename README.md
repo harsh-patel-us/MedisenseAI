@@ -117,7 +117,7 @@ MediSenseAI/
 │   │   ├── patient.py        # Report upload, analysis, PDF export
 │   │   ├── consultation.py   # Video call rooms, WebRTC, post-call summaries
 │   │   ├── chatbot.py        # Website support chatbot widget
-│   │   ├── patient_chatbot.py # Dr. MediSense persistent patient chatbot
+│   │   ├── patient_chatbot.py # Medisense AI persistent patient chatbot
 │   │   ├── meet.py           # Google Meet transcript processing
 │   │   └── google_oauth.py   # Google Calendar OAuth flow
 │   │
@@ -130,7 +130,7 @@ MediSenseAI/
 │   │   ├── pdf_export.py        # PDF generation (ReportLab)
 │   │   ├── auth_service.py      # Password hashing + JWT
 │   │   ├── chatbot_agent.py     # Website chatbot multi-agent system
-│   │   ├── patient_chatbot.py   # Dr. MediSense agent + memory
+│   │   ├── patient_chatbot.py   # Medisense AI agent + memory
 │   │   ├── google_calendar.py   # Google Calendar + Meet link creation
 │   │   ├── sarvam_stt_service.py # Sarvam AI speech-to-text
 │   │   └── sarvam_tts_service.py # Sarvam AI text-to-speech
@@ -160,7 +160,7 @@ MediSenseAI/
 │       │   ├── Login.tsx / Register.tsx        # Auth
 │       │   ├── DoctorDashboard.tsx             # Audio → SOAP workflow
 │       │   ├── PatientDashboard.tsx            # Report → health guide
-│       │   ├── PatientChat.tsx                 # Dr. MediSense chatbot
+│       │   ├── PatientChat.tsx                 # Medisense AI chatbot
 │       │   ├── ConsultationRoom.tsx            # WebRTC video call
 │       │   ├── JoinConsultation.tsx            # Join with room code
 │       │   ├── SchedulePage.tsx                # Doctor scheduling + Google Calendar
@@ -224,7 +224,7 @@ MediSenseAI/
 | Daily precautions + emergency signs | ✅ |
 | PDF health guide export | ✅ |
 
-### Patient AI Chatbot (Dr. MediSense)
+### Patient AI Chatbot (Medisense AI)
 | Feature | Status |
 |---------|--------|
 | Persistent chat sessions with full history | ✅ |
@@ -275,7 +275,7 @@ AI_MODEL=openai/gpt-4o-mini
 # ── Chatbot widget model ─────────────────────
 CHATBOT_MODEL=openai/gpt-4o-mini
 
-# ── Patient persistent chatbot (Dr. MediSense)
+# ── Patient persistent chatbot (Medisense AI)
 PATIENT_CHATBOT_MODEL=openai/gpt-4o-mini
 PATIENT_CHATBOT_SUMMARY_EVERY=10
 VISION_MODEL=openai/gpt-4o-mini
@@ -352,7 +352,7 @@ SARVAM_TTS_LANGUAGE=en-IN
 
 ### Scenario 3 — Patient AI Chatbot
 1. Login as a **patient**
-2. Click **Chat with Dr. MediSense** from the patient dashboard
+2. Click **Chat with Medisense AI** from the patient dashboard
 3. Ask about symptoms, medications, or upload a lab report image
 4. Use the microphone button for voice input (Sarvam AI STT)
 5. Toggle TTS in the header for voice replies

@@ -1,12 +1,25 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import ReportUploader from '../components/patient/ReportUploader';
 import ReportSummary from '../components/patient/ReportSummary';
 import SpecialistGuide from '../components/patient/SpecialistGuide';
 import DietExercisePlan from '../components/patient/DietExercisePlan';
 import PrecautionsList from '../components/patient/PrecautionsList';
-import { uploadReport, analyzeReport, exportPatientPdf } from '../api/patientApi';
-import type { PatientAnalysis, UploadResponse } from '../types/patient.types';
+import {
+  uploadReport,
+  analyzeReport,
+  exportPatientPdf,
+  listPatientHistory,
+  getPatientHistoryItem,
+  downloadHistoryUpload,
+  downloadHistoryPdf,
+} from '../api/patientApi';
+import type {
+  PatientAnalysis,
+  UploadResponse,
+  HistoryItem,
+  UrgencyLevel,
+} from '../types/patient.types';
 
 type TabKey = 'summary' | 'specialist' | 'diet' | 'precautions';
 
@@ -83,6 +96,22 @@ function PatientSidebar() {
   );
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function formatHistoryDate(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
 export default function PatientDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>('summary');
   const [isUploading, setIsUploading] = useState(false);
@@ -92,10 +121,37 @@ export default function PatientDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // ── History state ──────────────────────────────────────────────────
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [openHistoryId, setOpenHistoryId] = useState<string | null>(null);
+  const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
+
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await listPatientHistory();
+      setHistory(res.items);
+    } catch (err: any) {
+      setHistoryError(
+        err?.response?.data?.detail || err?.message || 'Could not load past reports',
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
   const handleUpload = async (file: File) => {
     setIsUploading(true);
     setError(null);
     setAnalysis(null);
+    setOpenHistoryId(null);
 
     try {
       const uploadRes = await uploadReport(file);
@@ -106,6 +162,8 @@ export default function PatientDashboard() {
       setIsAnalyzing(true);
       const analysisRes = await analyzeReport(uploadRes.file_id, uploadRes.raw_text);
       setAnalysis(analysisRes);
+      // Surface the new record in the history list right away.
+      void refreshHistory();
     } catch (err: any) {
       console.error('Upload/analyze failed:', err);
       setError(err.response?.data?.detail || err.message || 'Upload or analysis failed');
@@ -120,12 +178,10 @@ export default function PatientDashboard() {
     setExporting(true);
     try {
       const blob = await exportPatientPdf(analysis, 'Patient', uploadData?.file_id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'medisense_health_guide.pdf';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, 'medisense_health_guide.pdf');
+      // The PDF is now stored on the record, so the history list flips to
+      // "PDF available" — refresh to reflect that.
+      void refreshHistory();
     } catch (err) {
       console.error('PDF export failed:', err);
     } finally {
@@ -138,6 +194,75 @@ export default function PatientDashboard() {
     setAnalysis(null);
     setError(null);
     setActiveTab('summary');
+    setOpenHistoryId(null);
+  };
+
+  const handleOpenHistory = async (item: HistoryItem) => {
+    setHistoryBusyId(item.id);
+    setError(null);
+    try {
+      const detail = await getPatientHistoryItem(item.id);
+      const reanimated: PatientAnalysis = {
+        report_type: 'other',
+        findings: detail.findings,
+        conditions_suggested: [],
+        critical_alerts: [],
+        plain_summary: detail.summary,
+        what_this_means: '',
+        specialists: detail.specialists,
+        urgency: (detail.urgency as UrgencyLevel) || 'routine',
+        urgency_reason: '',
+        diet_plan: detail.diet_plan,
+        exercise_plan: detail.exercise_plan,
+        exercises_to_avoid: [],
+        precautions: detail.precautions,
+      };
+      setAnalysis(reanimated);
+      setUploadData({
+        file_id: detail.id,
+        file_name: detail.file_name,
+        raw_text: '',
+        file_type: detail.file_type,
+        char_count: 0,
+      });
+      setOpenHistoryId(detail.id);
+      setActiveTab('summary');
+      // Smooth scroll to the analysis area for context.
+      setTimeout(() => {
+        document.getElementById('analysis-area')?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.message || 'Could not open past report');
+    } finally {
+      setHistoryBusyId(null);
+    }
+  };
+
+  const handleDownloadHistoryFile = async (item: HistoryItem) => {
+    setHistoryBusyId(item.id);
+    try {
+      const blob = await downloadHistoryUpload(item.id);
+      downloadBlob(blob, item.file_name || `report_${item.id}`);
+    } catch (err: any) {
+      setHistoryError(err?.response?.data?.detail || 'Could not download original file');
+    } finally {
+      setHistoryBusyId(null);
+    }
+  };
+
+  const handleDownloadHistoryPdf = async (item: HistoryItem) => {
+    setHistoryBusyId(item.id);
+    try {
+      const blob = await downloadHistoryPdf(item.id);
+      downloadBlob(blob, `medisense_health_guide_${item.id}.pdf`);
+    } catch (err: any) {
+      setHistoryError(
+        err?.response?.data?.detail
+          || 'No PDF stored yet — open the report and click Download PDF to generate one.',
+      );
+    } finally {
+      setHistoryBusyId(null);
+    }
   };
 
   return (
@@ -213,7 +338,7 @@ export default function PatientDashboard() {
 
         {/* Results */}
         {analysis && (
-          <div style={{ marginTop: '24px' }}>
+          <div id="analysis-area" style={{ marginTop: '24px' }}>
             {/* Tab bar + actions */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -283,6 +408,136 @@ export default function PatientDashboard() {
             </div>
           </div>
         )}
+
+        {/* Past Reports */}
+        <div className="glass-card" style={{ marginTop: '32px', padding: '24px' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: '16px', flexWrap: 'wrap', gap: '8px',
+          }}>
+            <div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '4px' }}>
+                📚 Past Reports
+              </h3>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                Every report you've uploaded — open the summary or download the original/PDF anytime.
+              </p>
+            </div>
+            <button
+              className="btn-secondary"
+              onClick={() => void refreshHistory()}
+              disabled={historyLoading}
+              style={{ fontSize: '0.82rem' }}
+            >
+              {historyLoading ? 'Refreshing…' : '🔄 Refresh'}
+            </button>
+          </div>
+
+          {historyError && (
+            <div style={{
+              padding: '10px 14px', marginBottom: '12px',
+              background: 'rgba(220, 38, 38, 0.1)',
+              border: '1px solid rgba(220, 38, 38, 0.3)',
+              borderRadius: '10px', color: '#fca5a5', fontSize: '0.85rem',
+            }}>
+              ⚠️ {historyError}
+            </div>
+          )}
+
+          {!historyLoading && history.length === 0 && !historyError && (
+            <div style={{
+              padding: '24px', textAlign: 'center',
+              color: 'var(--text-muted)', fontSize: '0.88rem',
+            }}>
+              No past reports yet. Your first upload will show up here.
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {history.map((item) => {
+                const isOpen = openHistoryId === item.id;
+                const busy = historyBusyId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: '12px',
+                      border: isOpen
+                        ? '1px solid rgba(5,174,187,0.45)'
+                        : '1px solid var(--border-subtle)',
+                      background: isOpen
+                        ? 'rgba(5,174,187,0.08)'
+                        : 'rgba(6,13,27,0.45)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{
+                          fontSize: '0.92rem', fontWeight: 700,
+                          color: 'var(--text-primary)', marginBottom: '2px',
+                          wordBreak: 'break-word',
+                        }}>
+                          {item.file_name || 'Untitled report'}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {formatHistoryDate(item.created_at)}
+                          {item.urgency ? ` • urgency: ${item.urgency}` : ''}
+                          {item.has_generated_pdf ? ' • PDF ready' : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          className="btn-secondary"
+                          style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                          disabled={busy}
+                          onClick={() => void handleOpenHistory(item)}
+                        >
+                          {busy && !isOpen ? 'Opening…' : isOpen ? '✓ Open' : '📖 View'}
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                          disabled={busy || !item.has_uploaded_file}
+                          onClick={() => void handleDownloadHistoryFile(item)}
+                          title={item.has_uploaded_file ? 'Download original file' : 'Original file not stored'}
+                        >
+                          📎 Original
+                        </button>
+                        <button
+                          className="btn-primary"
+                          style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                          disabled={busy || !item.has_generated_pdf}
+                          onClick={() => void handleDownloadHistoryPdf(item)}
+                          title={item.has_generated_pdf ? 'Download generated PDF' : 'No PDF generated yet'}
+                        >
+                          📥 PDF
+                        </button>
+                      </div>
+                    </div>
+                    {item.summary && (
+                      <div style={{
+                        fontSize: '0.82rem', color: 'var(--text-secondary)',
+                        lineHeight: 1.5,
+                      }}>
+                        {item.summary.length > 220
+                          ? `${item.summary.slice(0, 220)}…`
+                          : item.summary}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

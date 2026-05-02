@@ -7,7 +7,7 @@ Two modes:
                 expects English text downstream.
   • codemix   — Saarika v2.5 / saaras transcribe verbatim (preserves
                 Hinglish / language switches). Used by the patient chatbot
-                so Dr. MediSense replies in the patient's own register.
+                so Medisense AI replies in the patient's own register.
 
 When SARVAM_API_KEY is not configured (or the sarvamai SDK is missing),
 every call transparently falls back to `services.transcription.transcribe_audio`

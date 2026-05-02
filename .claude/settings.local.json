@@ -8,7 +8,8 @@
       "Bash(sed -i \"s/^import React, { useState } from 'react';\\\\r*$/import { useState } from 'react';/\" components/doctor/SoapNoteEditor.tsx pages/PatientDashboard.tsx pages/DoctorDashboard.tsx)",
       "Bash(sed -i \"s/^import React from 'react';\\\\r*$//\" App.tsx)",
       "Bash(npx tsc *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python -c \"from routers import patient_chatbot; from database import PatientChatAttachment; print\\('routes:', [r.path for r in patient_chatbot.router.routes]\\); print\\('att cols:', [c.name for c in PatientChatAttachment.__table__.columns]\\)\")"
     ]
   }
 }

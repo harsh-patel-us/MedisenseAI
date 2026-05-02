@@ -37,7 +37,7 @@
 
 **Key Differentiators:**
 - Three distinct AI workflows in one platform
-- Persistent patient chatbot ("Dr. MediSense") with cross-session memory
+- Persistent patient chatbot ("Medisense AI") with cross-session memory
 - Browser-native WebRTC video consultations — no app install
 - JWT auth with role-based access (doctor / patient)
 
@@ -79,7 +79,7 @@ MediSense AI is a **multi-sided AI health platform**:
 - OCR extracts text from uploaded file
 - AI analyzes the report and produces: plain-language summary, flagged abnormal values, specialist recommendations, diet plan, exercise plan, daily precautions
 
-### Patient Side — Dr. MediSense Chatbot
+### Patient Side — Medisense AI Chatbot
 - Persistent AI medical companion that remembers patient history
 - Injects uploaded report summaries + past session summaries into context
 - Supports file attachments (images + PDFs) with vision AI analysis
@@ -102,7 +102,7 @@ MediSense AI is a **multi-sided AI health platform**:
 │                                                                   │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
 │  │   Doctor      │  │   Patient    │  │   Patient Chatbot    │   │
-│  │   Dashboard   │  │   Dashboard  │  │   (Dr. MediSense)    │   │
+│  │   Dashboard   │  │   Dashboard  │  │   (Medisense AI)    │   │
 │  │  - Record     │  │  - Upload    │  │  - Persistent chat   │   │
 │  │  - Transcript │  │  - 4-tab UI  │  │  - File attachments  │   │
 │  │  - SOAP edit  │  │  - PDF guide │  │  - Session history   │   │
@@ -118,7 +118,7 @@ MediSense AI is a **multi-sided AI health platform**:
 │                      BACKEND (FastAPI)                             │
 │                                                                   │
 │  Auth (JWT) ─── Doctor ─── Patient ─── Consultation               │
-│  Chatbot Widget ─── Patient Chatbot (Dr. MediSense)               │
+│  Chatbot Widget ─── Patient Chatbot (Medisense AI)               │
 │  Meet ─── Google OAuth ─── Google Calendar                        │
 │                                                                   │
 │  Services: claude_service, transcription, diarization, ner,       │
@@ -190,7 +190,7 @@ MediSenseAI/
 │   │   ├── summary_specialist.txt     # Summary + specialist routing
 │   │   ├── lifestyle_guide.txt        # Diet/exercise/precautions
 │   │   ├── patient_explanation.txt    # Post-call patient guide
-│   │   ├── patient_chatbot_system.txt # Dr. MediSense system prompt
+│   │   ├── patient_chatbot_system.txt # Medisense AI system prompt
 │   │   ├── patient_chatbot_summary.txt # Session summary prompt
 │   │   ├── chatbot_system.txt         # Website chatbot prompt
 │   │   └── safety_system.txt          # Safety guardrails
@@ -200,7 +200,7 @@ MediSenseAI/
 │   │   ├── patient.py                 # POST /patient/upload, /patient/analyze, /patient/export-pdf
 │   │   ├── consultation.py            # Consultation rooms, WebRTC, post-call
 │   │   ├── chatbot.py                 # POST /chatbot/message
-│   │   ├── patient_chatbot.py         # Dr. MediSense sessions + messages + voice
+│   │   ├── patient_chatbot.py         # Medisense AI sessions + messages + voice
 │   │   ├── meet.py                    # Google Meet transcript processing
 │   │   └── google_oauth.py            # Google Calendar OAuth flow
 │   ├── services/
@@ -212,7 +212,7 @@ MediSenseAI/
 │   │   ├── pdf_export.py              # ReportLab PDF generation
 │   │   ├── auth_service.py            # bcrypt hashing + JWT
 │   │   ├── chatbot_agent.py           # Website chatbot multi-agent system
-│   │   ├── patient_chatbot.py         # Dr. MediSense memory + agent
+│   │   ├── patient_chatbot.py         # Medisense AI memory + agent
 │   │   ├── google_calendar.py         # Google Calendar + Meet link creation
 │   │   ├── sarvam_stt_service.py      # Sarvam AI speech-to-text
 │   │   └── sarvam_tts_service.py      # Sarvam AI text-to-speech
@@ -236,7 +236,7 @@ MediSenseAI/
 │   │   ├── Login.tsx, Register.tsx
 │   │   ├── DoctorDashboard.tsx
 │   │   ├── PatientDashboard.tsx
-│   │   ├── PatientChat.tsx            # Dr. MediSense chatbot UI
+│   │   ├── PatientChat.tsx            # Medisense AI chatbot UI
 │   │   ├── ConsultationRoom.tsx
 │   │   ├── JoinConsultation.tsx
 │   │   ├── SchedulePage.tsx
@@ -299,7 +299,7 @@ AI Prompt 4: Lifestyle Guide → { diet, exercise, precautions }
 4-Tab Patient Dashboard → Downloadable PDF Health Guide
 ```
 
-### 7.3 Patient Chatbot — Dr. MediSense
+### 7.3 Patient Chatbot — Medisense AI
 
 ```
 Patient opens /patient/chat
@@ -371,7 +371,7 @@ POST  /consultation/end          { room_id }                  →  { soap_note, 
 WS    /consultation/ws/{room_id} WebRTC signaling + live transcript
 ```
 
-### Patient Chatbot (Dr. MediSense)
+### Patient Chatbot (Medisense AI)
 ```
 GET   /patient-chat/{patient_id}/history         →  { sessions[] }
 GET   /patient-chat/session/{session_id}         →  { messages[] }
@@ -403,8 +403,8 @@ All prompts live in the `prompts/` folder as plain-text `.txt` files. They are l
 | 3 | `summary_specialist.txt` | `SUMMARY_SPECIALIST_PROMPT` | Patient | Plain-language summary + specialist routing |
 | 4 | `lifestyle_guide.txt` | `LIFESTYLE_GUIDE_PROMPT` | Patient | Diet, exercise, precautions tailored to conditions |
 | 5 | `patient_explanation.txt` | `PATIENT_EXPLANATION_PROMPT` | Consultation | Post-call patient-friendly explanation of SOAP note |
-| 6 | `patient_chatbot_system.txt` | `PATIENT_CHATBOT_SYSTEM_PROMPT` | Dr. MediSense | System prompt with patient profile + memory injection |
-| 7 | `patient_chatbot_summary.txt` | `PATIENT_CHATBOT_SUMMARY_PROMPT` | Dr. MediSense | Auto-summarize chat sessions for future memory |
+| 6 | `patient_chatbot_system.txt` | `PATIENT_CHATBOT_SYSTEM_PROMPT` | Medisense AI | System prompt with patient profile + memory injection |
+| 7 | `patient_chatbot_summary.txt` | `PATIENT_CHATBOT_SUMMARY_PROMPT` | Medisense AI | Auto-summarize chat sessions for future memory |
 | 8 | `chatbot_system.txt` | `CHATBOT_SYSTEM_PROMPT` | Website widget | Visitor-facing support chatbot personality |
 | 9 | `safety_system.txt` | `SAFETY_SYSTEM_MESSAGE` | All AI calls | Medical safety guardrails prepended to every call |
 
@@ -465,7 +465,7 @@ CREATE TABLE patient_analyses (
     generated_pdf_path TEXT, generated_pdf_size INTEGER
 );
 
--- Dr. MediSense chat sessions
+-- Medisense AI chat sessions
 CREATE TABLE patient_chat_sessions (
     id TEXT PRIMARY KEY,
     patient_id TEXT REFERENCES users(id) NOT NULL,
@@ -477,7 +477,7 @@ CREATE TABLE patient_chat_sessions (
     last_summary_at_count INTEGER DEFAULT 0
 );
 
--- Dr. MediSense chat messages
+-- Medisense AI chat messages
 CREATE TABLE patient_chat_messages (
     id TEXT PRIMARY KEY,
     session_id TEXT REFERENCES patient_chat_sessions(id) NOT NULL,
@@ -633,7 +633,7 @@ Register as doctor → Dashboard → Record → Read chest_pain_consultation.txt
 Register as patient → Dashboard → Upload diabetes_blood_report.pdf → View 4 tabs → Download PDF
 
 ### Scenario 3 — Patient (AI Chatbot)
-Login as patient → Chat with Dr. MediSense → Ask about symptoms → Upload lab image → Start new chat → AI remembers history
+Login as patient → Chat with Medisense AI → Ask about symptoms → Upload lab image → Start new chat → AI remembers history
 
 ### Scenario 4 — Video Consultation
 Doctor creates room → Shares code → Patient joins → Video call → Call ends → Auto SOAP + patient explanation

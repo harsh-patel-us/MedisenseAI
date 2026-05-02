@@ -91,3 +91,43 @@ class ExportPdfRequest(BaseModel):
     analysis_result: PatientAnalysis
     patient_name: Optional[str] = "Anonymous Patient"
     file_id: Optional[str] = None
+
+
+# ── Patient history ───────────────────────────────────────────────────────
+
+class HistoryItem(BaseModel):
+    """One row in /patient/history — light enough for a sidebar/list."""
+    id: str
+    created_at: str
+    file_name: str = ""
+    file_type: str = ""
+    file_size: Optional[int] = None
+    summary: str = ""
+    urgency: str = ""
+    has_uploaded_file: bool = False
+    has_generated_pdf: bool = False
+    generated_pdf_size: Optional[int] = None
+
+
+class HistoryListResponse(BaseModel):
+    patient_id: str
+    items: List[HistoryItem] = []
+
+
+class HistoryDetail(BaseModel):
+    """Full payload for a single past analysis — drives the re-render."""
+    id: str
+    created_at: str
+    file_name: str = ""
+    file_type: str = ""
+    file_size: Optional[int] = None
+    summary: str = ""
+    urgency: str = ""
+    findings: list = []
+    specialists: list = []
+    diet_plan: dict = {}
+    exercise_plan: list = []
+    precautions: dict = {}
+    has_uploaded_file: bool = False
+    has_generated_pdf: bool = False
+    generated_pdf_size: Optional[int] = None

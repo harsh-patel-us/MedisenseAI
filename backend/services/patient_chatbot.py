@@ -1,5 +1,5 @@
 """
-patient_chatbot.py — Dr. MediSense, the patient-side persistent chatbot.
+patient_chatbot.py — Medisense AI, the patient-side persistent chatbot.
 
 Built on the OpenAI Agents SDK (`openai-agents`). A single `DrMediSense` agent
 is given two tools:
@@ -64,6 +64,22 @@ class ChatAttachment:
 
 
 @dataclass
+class SessionAttachmentMemo:
+    """A file the patient uploaded earlier in this same session.
+
+    `extracted_text` is the OCR / PDF text we already computed once when the
+    file was first received — surfacing it to the agent lets it answer
+    follow-up questions ("what was the LDL on the report I sent earlier?")
+    without re-running OCR.
+    """
+    filename: str
+    mime_type: str
+    kind: str
+    created_at: str
+    extracted_text: str = ""
+
+
+@dataclass
 class ChatContext:
     """Per-request context bag the Agents SDK passes to each tool.
 
@@ -72,6 +88,7 @@ class ChatContext:
     patient_id: str
     db: Optional[AsyncSession]
     attachments: list[ChatAttachment] = field(default_factory=list)
+    session_attachments: list[SessionAttachmentMemo] = field(default_factory=list)
 
 
 # ── Context builder used both by the system prompt and the history tool ─
@@ -263,7 +280,7 @@ _dr_medisense: Agent[ChatContext] | None = None
 def _build_model() -> OpenAIChatCompletionsModel:
     """gpt-4o-mini bound to OpenRouter (OpenAI-compatible chat-completions)."""
     if not settings.openrouter_api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set — Dr. MediSense is unavailable.")
+        raise RuntimeError("OPENROUTER_API_KEY is not set — Medisense AI is unavailable.")
     client = AsyncOpenAI(
         api_key=settings.openrouter_api_key,
         base_url=settings.openrouter_base_url,
@@ -306,11 +323,37 @@ def _dynamic_instructions(
             "your reply. Reference the attachment by its filename in your answer."
         )
 
-    return format_system_prompt(profile, report_summary, past_summary) + attachments_block
+    # Files uploaded EARLIER in this same session — bytes already in DB. We
+    # surface the previously-extracted text so the agent can answer questions
+    # like "what was on the prescription I sent earlier" without re-uploading.
+    session_attachments_block = ""
+    if base.session_attachments:
+        chunks = []
+        for memo in base.session_attachments:
+            text = (memo.extracted_text or "").strip()
+            if len(text) > 600:
+                text = text[:600] + "…(truncated)"
+            chunks.append(
+                f"- {memo.filename} ({memo.kind}, sent {memo.created_at})"
+                + (f"\n  Content: {text}" if text else "")
+            )
+        session_attachments_block = (
+            "\n\nFILES THE PATIENT UPLOADED EARLIER IN THIS SESSION:\n"
+            + "\n".join(chunks)
+            + "\n\nUse this content directly when the patient asks about a "
+            "previously-shared file. Reference it by filename. Do not ask the "
+            "patient to re-upload."
+        )
+
+    return (
+        format_system_prompt(profile, report_summary, past_summary)
+        + session_attachments_block
+        + attachments_block
+    )
 
 
 def get_dr_medisense() -> Agent[ChatContext]:
-    """Lazily construct the Dr. MediSense agent on first use."""
+    """Lazily construct the Medisense AI agent on first use."""
     global _dr_medisense
     if _dr_medisense is None:
         _dr_medisense = Agent[ChatContext](
@@ -389,13 +432,20 @@ async def generate_chat_reply(
     history: list[dict[str, str]],
     user_message: str | None,
     attachments: list[ChatAttachment] | None = None,
+    session_attachments: list[SessionAttachmentMemo] | None = None,
 ) -> str:
-    """Run one turn through Dr. MediSense and return the assistant reply text."""
+    """Run one turn through Medisense AI and return the assistant reply text."""
     attachments = attachments or []
+    session_attachments = session_attachments or []
 
     # Pre-load context so the dynamic instructions function is fast and sync.
     profile, report_summary, past_summaries = await build_patient_context(db, patient_id)
-    ctx = ChatContext(patient_id=patient_id, db=db, attachments=attachments)
+    ctx = ChatContext(
+        patient_id=patient_id,
+        db=db,
+        attachments=attachments,
+        session_attachments=session_attachments,
+    )
     # Stash on the dataclass via private attrs — read by `_dynamic_instructions`.
     ctx._patient_name = profile["patient_name"]            # type: ignore[attr-defined]
     ctx._patient_age = profile["patient_age"]              # type: ignore[attr-defined]

@@ -6,6 +6,7 @@ import {
   endPatientChatSession,
   endPatientChatSessionBeacon,
   fileToBase64,
+  getChatAttachment,
   getPatientChatHistory,
   getPatientChatSession,
   sendPatientChatMessage,
@@ -155,7 +156,7 @@ function BotAvatar({ size = 36 }: { size?: number }) {
         {/* tube down */}
         <path d="M8 15a6 6 0 0 0 6 6h0a6 6 0 0 0 6-6v-3" />
         {/* chest piece circle */}
-        <circle cx="20" cy="10" r="2" fill="rgba(255,255,255,0.95)" stroke="none"/>
+        <circle cx="20" cy="10" r="2" fill="rgba(255,255,255,0.95)" stroke="none" />
       </svg>
     </div>
   );
@@ -453,7 +454,7 @@ export default function PatientChat() {
       void refreshHistory();
     } catch (err: unknown) {
       console.error('Send failed', err);
-      setError("Sorry, I couldn't reach Dr. MediSense. Please try again.");
+      setError("Sorry, I couldn't reach Medisense AI. Please try again.");
       setMessages((prev) => prev.filter((m) => m.id !== loadingMsg.id));
     } finally {
       setSending(false);
@@ -592,7 +593,7 @@ export default function PatientChat() {
   useEffect(() => {
     return () => {
       if (ttsAudioRef.current) {
-        ttsAudioRef.current.close().catch(() => {});
+        ttsAudioRef.current.close().catch(() => { });
       }
     };
   }, []);
@@ -1201,8 +1202,44 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
 
 function FileChip({ ref_, onLightBg }: { ref_: ChatFileReference; onLightBg: boolean }) {
   const icon = ref_.kind === 'image' ? '🖼️' : '📄';
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadable = Boolean(ref_.attachment_id);
+
+  const handleDownload = async () => {
+    if (!ref_.attachment_id || downloading) return;
+    setDownloading(true);
+    try {
+      const blob = await getChatAttachment(ref_.attachment_id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ref_.filename || 'attachment';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Attachment download failed:', err);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div
+      role={downloadable ? 'button' : undefined}
+      tabIndex={downloadable ? 0 : undefined}
+      onClick={downloadable ? handleDownload : undefined}
+      onKeyDown={
+        downloadable
+          ? (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              void handleDownload();
+            }
+          }
+          : undefined
+      }
+      title={downloadable ? 'Click to download' : undefined}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -1211,6 +1248,8 @@ function FileChip({ ref_, onLightBg }: { ref_: ChatFileReference; onLightBg: boo
         background: onLightBg ? 'rgba(5,174,187,0.15)' : 'rgba(255,255,255,0.18)',
         borderRadius: 10,
         fontSize: '0.78rem',
+        cursor: downloadable ? 'pointer' : 'default',
+        opacity: downloading ? 0.6 : 1,
       }}
     >
       <span style={{ fontSize: 16 }}>{icon}</span>
@@ -1218,6 +1257,9 @@ function FileChip({ ref_, onLightBg }: { ref_: ChatFileReference; onLightBg: boo
         {ref_.filename}
       </span>
       <span style={{ opacity: 0.7 }}>· {formatFileSize(ref_.size_bytes)}</span>
+      {downloadable && (
+        <span style={{ opacity: 0.85, marginLeft: 4 }}>{downloading ? '⏳' : '⬇'}</span>
+      )}
     </div>
   );
 }

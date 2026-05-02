@@ -1,6 +1,6 @@
 """
 patient_chatbot_models.py — Pydantic schemas for the patient-side persistent
-medical chatbot ("Dr. MediSense").
+medical chatbot ("Medisense AI").
 """
 from datetime import datetime
 from typing import List, Literal, Optional
@@ -24,11 +24,16 @@ class ChatAttachmentDTO(BaseModel):
 
 class ChatFileReference(BaseModel):
     """Persisted descriptor of an attachment that was sent on a turn.
-    Raw bytes are NEVER persisted — only filename, type, and size."""
+
+    `attachment_id` points at the `PatientChatAttachment` row that holds
+    the raw bytes + extracted text. The frontend can use it to fetch
+    /patient/chat/attachment/{id} for re-download or preview.
+    """
     filename: str
     mime_type: str
     size_bytes: int
     kind: AttachmentKind
+    attachment_id: Optional[str] = None
 
 
 class PatientChatMessageDTO(BaseModel):

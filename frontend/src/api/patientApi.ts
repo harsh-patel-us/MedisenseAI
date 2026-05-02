@@ -1,5 +1,10 @@
 import axios from 'axios';
-import type { UploadResponse, PatientAnalysis } from '../types/patient.types';
+import type {
+  UploadResponse,
+  PatientAnalysis,
+  HistoryListResponse,
+  HistoryDetail,
+} from '../types/patient.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -43,6 +48,40 @@ export async function exportPatientPdf(
       file_id: fileId,
     },
     { responseType: 'blob' }
+  );
+  return response.data;
+}
+
+/* ── History ──────────────────────────────────────────────────────────── */
+
+export async function listPatientHistory(): Promise<HistoryListResponse> {
+  const { data } = await axios.get<HistoryListResponse>(
+    `${API_BASE}/patient/history`,
+  );
+  return data;
+}
+
+export async function getPatientHistoryItem(
+  recordId: string,
+): Promise<HistoryDetail> {
+  const { data } = await axios.get<HistoryDetail>(
+    `${API_BASE}/patient/history/${encodeURIComponent(recordId)}`,
+  );
+  return data;
+}
+
+export async function downloadHistoryUpload(recordId: string): Promise<Blob> {
+  const response = await axios.get(
+    `${API_BASE}/patient/history/${encodeURIComponent(recordId)}/file`,
+    { responseType: 'blob' },
+  );
+  return response.data;
+}
+
+export async function downloadHistoryPdf(recordId: string): Promise<Blob> {
+  const response = await axios.get(
+    `${API_BASE}/patient/history/${encodeURIComponent(recordId)}/pdf`,
+    { responseType: 'blob' },
   );
   return response.data;
 }
