@@ -11,11 +11,11 @@ export default defineConfig({
       // Single /api prefix — avoids collision with SPA routes like
       // /doctor, /patient, /consultation, /integrations, etc.
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         ws: true,
       },
-      '/health': 'http://localhost:8000',
+      '/health': 'http://127.0.0.1:8000',
     },
   },
 })
