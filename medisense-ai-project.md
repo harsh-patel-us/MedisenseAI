@@ -68,12 +68,14 @@
 MediSense AI is a **multi-sided AI health platform**:
 
 ### Doctor Side
-- Records consultation audio in real time
+- Doctor uploads a pre-recorded consultation audio file (mp3, wav, webm, ogg, flac, or m4a)
 - Transcribes speech using Gemini Flash (STT via OpenRouter)
-- Labels Doctor vs Patient speech (speaker diarization)
+- Labels Doctor vs Patient speech (alternating turns based on transcript line breaks)
 - Extracts medical entities (symptoms, drugs, diagnoses)
 - Auto-generates a structured SOAP clinical note
 - Doctor reviews, edits, and exports as PDF
+
+> **Live recording removed (May 2026):** the previous browser-mic + WebSocket streaming flow is no longer wired into the dashboard. The `WebSocket /doctor/stream-audio` endpoint and `useAudioRecorder` / `AudioRecorder` / `LiveTranscript` modules remain on disk but are unused — the dashboard now uses `AudioFileUpload` + `TranscriptView` against `POST /doctor/upload-audio`.
 
 ### Patient Side — Report Analysis
 - Patient uploads blood report / lab result / prescription (PDF or image)
@@ -109,10 +111,11 @@ MediSense AI is a **multi-sided AI health platform**:
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
 │  │   Doctor      │  │   Patient    │  │   Patient Chatbot    │   │
 │  │   Dashboard   │  │   Dashboard  │  │   (Medisense AI)     │   │
-│  │  - Record     │  │  - Upload    │  │  - Persistent chat   │   │
-│  │  - Transcript │  │  - 4-tab UI  │  │  - File attachments  │   │
-│  │  - SOAP edit  │  │  - PDF guide │  │  - Voice in / out    │   │
-│  │  - Process    │  │              │  │  - Session history   │   │
+│  │  - Upload     │  │  - Upload    │  │  - Persistent chat   │   │
+│  │    audio file │  │  - 4-tab UI  │  │  - File attachments  │   │
+│  │  - Transcript │  │  - PDF guide │  │  - Voice in / out    │   │
+│  │  - SOAP edit  │  │              │  │  - Session history   │   │
+│  │  - Process    │  │              │  │                      │   │
 │  │    Meet       │  │              │  │                      │   │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘   │
 │         │                 │                      │               │
@@ -120,7 +123,7 @@ MediSense AI is a **multi-sided AI health platform**:
 │  │      Schedule Page  ──▶  Google Meet (external client)     │   │
 │  └────────────────────────────┬───────────────────────────────┘   │
 └───────────────────────────────┼───────────────────────────────────┘
-                                │ HTTP + 1 WebSocket (doctor STT)
+                                │ HTTP only (live WebSocket STT removed)
                                 ▼
 ┌───────────────────────────────────────────────────────────────────┐
 │                      BACKEND (FastAPI, /api prefix)                │
@@ -177,7 +180,7 @@ MediSense AI is a **multi-sided AI health platform**:
 | TypeScript 5+ | Type safety |
 | Vite | Build tool + dev server |
 | Vanilla CSS | Glassmorphism styling (no Tailwind) |
-| WebSocket API | Real-time STT streaming on the doctor side |
+| File upload (multipart) | Doctor consultation audio → server-side STT |
 | Google Meet (external) | Video consultations — opened from `SchedulePage.tsx` |
 
 ---
@@ -205,7 +208,8 @@ MediSenseAI/
 │   │   └── safety_system.txt          # Safety guardrails
 │   ├── routers/                       # 7 routers, all mounted under /api
 │   │   ├── auth.py                    # POST /auth/register, /auth/login, GET /auth/me
-│   │   ├── doctor.py                  # WS /doctor/stream-audio, POST /doctor/generate-note, /export-pdf, GET /sessions
+│   │   ├── doctor.py                  # POST /doctor/upload-audio, /generate-note, /export-pdf, GET /sessions
+│   │   │                              # (legacy WS /doctor/stream-audio still defined but unused)
 │   │   ├── patient.py                 # POST /patient/upload, /analyze, /export-pdf, GET /history*
 │   │   ├── chatbot.py                 # POST /chatbot/message
 │   │   ├── patient_chatbot.py         # Medisense AI sessions + messages + voice + TTS + attachments
@@ -249,7 +253,8 @@ MediSenseAI/
 │   │   └── [8 marketing pages]
 │   ├── components/
 │   │   ├── ChatbotWidget.tsx, ProtectedRoute.tsx, ScrollToTop.tsx
-│   │   ├── doctor/     (AudioRecorder, LiveTranscript, SoapNoteEditor)
+│   │   ├── doctor/     (AudioFileUpload, TranscriptView, SoapNoteEditor;
+│   │   │                AudioRecorder + LiveTranscript still on disk but unused)
 │   │   └── patient/    (ReportUploader, ReportSummary, SpecialistGuide, DietExercisePlan, PrecautionsList)
 │   ├── api/            (authApi, doctorApi, patientApi, chatbotApi,
 │   │                    patientChatbotApi, meetApi, googleIntegrationApi)
@@ -261,7 +266,9 @@ MediSenseAI/
 ├── demo/
 │   ├── sample_reports/
 │   ├── sample_transcripts/
-│   └── generate_sample_reports.py
+│   ├── sample_audio/                  # doctor_patient_demo.mp3 + .txt (gTTS)
+│   ├── generate_sample_reports.py
+│   └── generate_sample_audio.py
 │
 ├── CLAUDE.md
 ├── README.md
@@ -272,20 +279,22 @@ MediSenseAI/
 
 ## 7. Module Workflows
 
-### 7.1 Doctor Side — Audio to SOAP Note
+### 7.1 Doctor Side — Audio Upload to SOAP Note
 
 ```
-Browser Mic → AudioChunks → WebSocket → Gemini Flash STT → Raw Transcript
-                                                    ↓
-                                      Pause-Based Speaker Diarization
-                                                    ↓
-                                      Labeled Transcript (DOCTOR/PATIENT)
-                                                    ↓
-                                      Regex Medical NER
-                                                    ↓
-                                      AI (Prompt 1) → SOAP Note JSON
-                                                    ↓
-                                      Frontend Editor → PDF Export
+Doctor uploads audio file (mp3 / wav / webm / ogg / flac / m4a)
+        ↓
+POST /api/doctor/upload-audio  (multipart, ≤ MAX_FILE_SIZE_MB)
+        ↓
+services/transcription.py → Gemini Flash STT (OpenRouter)  →  Raw Transcript text
+        ↓
+routers/doctor.py: split transcript by line breaks, alternate DOCTOR/PATIENT turns
+        ↓
+TranscriptSegment[] returned to the dashboard along with a fresh session_id
+        ↓
+POST /api/doctor/generate-note  →  Regex Medical NER  →  AI (Prompt 1) → SOAP Note JSON
+        ↓
+SoapNoteEditor → PDF Export
 ```
 
 ### 7.2 Patient Side — Report Upload to Health Guide
@@ -383,10 +392,11 @@ GET   /api/auth/me         (Bearer token)                        →  { user }
 
 ### Doctor
 ```
-WS    /api/doctor/stream-audio       Streams audio chunks, returns transcript segments
-POST  /api/doctor/generate-note      { transcript, session_id }  →  { soap_note, entities }
-POST  /api/doctor/export-pdf         { soap_note }               →  PDF file
-GET   /api/doctor/sessions           List past consultation sessions
+POST  /api/doctor/upload-audio       multipart { file }                →  { session_id, transcript[], raw_text }
+POST  /api/doctor/generate-note      { transcript, session_id }        →  { soap_note, entities }
+POST  /api/doctor/export-pdf         { soap_note }                     →  PDF file
+GET   /api/doctor/sessions                                             →  list past consultation sessions
+WS    /api/doctor/stream-audio       (legacy — defined but unused; kept for backwards compat)
 ```
 
 ### Patient
@@ -739,8 +749,8 @@ interface ScheduledMeeting {
 
 ## 14. Demo Scenarios
 
-### Scenario 1 — Doctor (Chest Pain)
-Register as doctor → Dashboard → Record → Read chest_pain_consultation.txt → Stop → Generate SOAP → Export PDF
+### Scenario 1 — Doctor (Audio Upload)
+`pip install gTTS && python demo/generate_sample_audio.py` → register as doctor → Dashboard → **Upload Consultation Audio** → pick `demo/sample_audio/doctor_patient_demo.mp3` → **Transcribe Audio** → review transcript → **Generate SOAP Note** → review/edit → **Download PDF** → click **Upload Another Audio File** to start over.
 
 ### Scenario 2 — Patient (Report Analysis)
 Register as patient → Dashboard → Upload diabetes_blood_report.pdf → View 4 tabs → Download PDF

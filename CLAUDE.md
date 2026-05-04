@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MediSense AI is a full-stack AI-powered medical intelligence platform with **three** core workflows:
 
-- **Doctor side**: Audio recording → STT → diarization → medical NER → AI SOAP note generation → PDF export
+- **Doctor side**: Audio file upload → STT → diarization → medical NER → AI SOAP note generation → PDF export
 - **Patient side**: Lab report upload → text extraction → AI analysis → health guide (diet/exercise/precautions) → PDF export
 - **Patient chatbot ("Medisense AI")**: Persistent, session-based AI medical assistant that remembers patient history, uploaded reports, and past conversations — with file attachment support (images + PDFs) and voice input/output
 
@@ -60,6 +60,11 @@ python scripts/setup_google_calendar.py
 # From project root — generates 3 sample PDF lab reports in demo/sample_reports/
 pip install reportlab
 python demo/generate_sample_reports.py
+
+# Generates a ~15-20 sec doctor/patient dialog MP3 in demo/sample_audio/
+# for testing the Doctor Dashboard "Upload Consultation Audio" flow
+pip install gTTS
+python demo/generate_sample_audio.py
 ```
 
 ## Architecture
@@ -83,7 +88,7 @@ python demo/generate_sample_reports.py
 
 - **`routers/`**: Seven route groups (all mounted under `/api`)
   - `auth.py` — JWT-based register/login/me endpoints
-  - `doctor.py` — WebSocket `/doctor/stream-audio` for real-time audio streaming + POST endpoints for SOAP generation and PDF export, GET `/doctor/sessions` for past consultations
+  - `doctor.py` — `POST /doctor/upload-audio` accepts an audio file, transcribes it via Gemini Flash, and returns alternating DOCTOR/PATIENT segments. POST endpoints for SOAP generation and PDF export, GET `/doctor/sessions` for past consultations. The legacy `WebSocket /doctor/stream-audio` route is still present but no longer used by the dashboard (live recording was removed)
   - `patient.py` — POST endpoints for file upload, analysis, and PDF export, plus `/patient/history`, `/history/{id}`, `/history/{id}/file`, `/history/{id}/pdf`
   - `chatbot.py` — Website support chatbot widget (visitor-facing, stateless or session-based)
   - `patient_chatbot.py` — Medisense AI persistent patient chatbot (`/message`, `/history/{patient_id}`, `/session/{session_id}`, `/session/end`, `/voice-message`, `/tts`, `/attachment/{attachment_id}`)
@@ -146,7 +151,7 @@ python demo/generate_sample_reports.py
 - **`App.tsx`** — Landing page (hero, stats, feature cards, interactive demo, FAQ, footer) + Navbar + route setup. Contains `PublicOnly` and `VisitorOnlyChatbot` wrappers. The "Join Call" navbar/footer entries and the `/consultation/join` and `/consultation/room/:roomId` routes have been removed; the only consultation entry point is `/consultation/schedule`.
 - **`pages/`** (14 pages, no in-app video room)
   - `Login.tsx` / `Register.tsx` — Auth pages
-  - `DoctorDashboard.tsx` — Audio recorder, live transcript panel, SOAP note editor, PDF export, plus a "Process Google Meet Consultation" section that lists unprocessed Meet sessions, triggers processing, polls `/meet/process-status/{task_id}`, and shows the result in `SoapNoteEditor`. The header has a "📅 Schedule Google Meet" link to `/consultation/schedule` (the old "Start Video Consultation" modal is gone).
+  - `DoctorDashboard.tsx` — Audio **file upload**, transcript view, SOAP note editor, PDF export, plus a "Process Google Meet Consultation" section that lists unprocessed Meet sessions, triggers processing, polls `/meet/process-status/{task_id}`, and shows the result in `SoapNoteEditor`. The header has a "📅 Schedule Google Meet" link to `/consultation/schedule`. The old in-browser recorder and live transcript flow is commented out — the dashboard now expects the doctor to upload a pre-recorded consultation audio file.
   - `PatientDashboard.tsx` — Report uploader, 4-tab results interface
   - `PatientChat.tsx` — Medisense AI persistent chatbot (sidebar with session history, message bubbles, file attachments, animated thinking indicator, microphone button for voice input with STT transcription, TTS toggle for voice replies)
   - `SchedulePage.tsx` — **Both doctors and patients** can schedule. Form posts to `/api/meet/schedule`; the success panel shows the Meet link with a copy button + "Open Google Meet Now" CTA. The upcoming-meetings card has a "Join Google Meet" button + "Calendar" link, and (doctors only) a deep-link to the Meet processing section on the dashboard.
@@ -155,7 +160,7 @@ python demo/generate_sample_reports.py
   - `ChatbotWidget.tsx` — Floating chatbot widget for visitors
   - `ProtectedRoute.tsx` — Role-based route guard
   - `ScrollToTop.tsx` — Scroll restoration on navigation
-  - `doctor/` — AudioRecorder, LiveTranscript, SoapNoteEditor
+  - `doctor/` — AudioFileUpload, TranscriptView, SoapNoteEditor (the older AudioRecorder + LiveTranscript files are still on disk but no longer imported by `DoctorDashboard.tsx`)
   - `patient/` — ReportUploader, ReportSummary, SpecialistGuide, DietExercisePlan, PrecautionsList
   - (No `consultation/` directory — VideoGrid, CallControls, ConsultationTranscript and PostCallSummary were removed with the WebRTC room.)
 - **`api/`** (7 modules — no `consultationApi.ts`)
@@ -194,7 +199,7 @@ python demo/generate_sample_reports.py
 - **Google Calendar + Meet integration** is the only video-call surface. Scheduling a consultation creates a Calendar event with an auto-generated Meet link; the conference id is parsed out of the Meet URL and stored on the same `ConsultationSession` row in `processing_status="pending"`. Setup via `python scripts/setup_google_calendar.py` (platform-level), or per-user via the OAuth flow in `routers/google_oauth.py`.
 - **Google Meet processing**: doctors see unprocessed sessions on their dashboard, click "Process", and the backend runs the diarization → NER → SOAP pipeline via FastAPI `BackgroundTasks`. The dashboard polls `/meet/process-status/{task_id}` and renders the result in `SoapNoteEditor`.
 - **Scheduling endpoints** all live in `routers/meet.py` — there is no `routers/consultation.py` anymore. Scheduling is permitted for both `doctor` and `patient` roles; the `organizer_role` column records which one created the row.
-- **WebSocket** on the doctor side sends audio chunks from the browser; the backend transcribes each chunk and streams labeled transcript segments back. (This is the only remaining WebSocket — the WebRTC consultation socket is gone.)
+- **Doctor consultation audio** is now a single-shot upload through `POST /doctor/upload-audio`. The backend reads the whole file, transcribes it via Gemini Flash, splits the multi-line transcript into alternating DOCTOR/PATIENT segments, and returns them with a fresh `session_id` for `POST /doctor/generate-note`. The legacy `WebSocket /doctor/stream-audio` route still exists but the dashboard does not call it.
 - **Database migrations** are handled via idempotent `ALTER TABLE ADD COLUMN` statements in `init_db()` so the same code works against SQLite (dev) and PostgreSQL (prod via asyncpg).
 
 ## Environment Configuration

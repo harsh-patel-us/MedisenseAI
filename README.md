@@ -87,6 +87,19 @@ This creates 3 realistic PDF lab reports in `demo/sample_reports/` for testing:
 - `low_haemoglobin_cbc.pdf` — Iron deficiency anaemia
 - `liver_function_test.pdf` — Hepatic stress markers
 
+### 5. Generate Demo Doctor/Patient Audio (Optional)
+
+```bash
+# From the project root
+pip install gTTS
+python demo/generate_sample_audio.py
+```
+
+Writes `demo/sample_audio/doctor_patient_demo.mp3` (~15-20 sec dialog about a
+cough + low-grade fever) and `doctor_patient_demo.txt` (the spoken script).
+Upload the MP3 in the Doctor Dashboard → **Upload Consultation Audio** card to
+test the end-to-end transcription → SOAP-note flow.
+
 ---
 
 ## 🏗️ Architecture
@@ -118,7 +131,9 @@ MediSenseAI/
 │   │
 │   ├── routers/
 │   │   ├── auth.py           # JWT register/login/me
-│   │   ├── doctor.py         # WebSocket audio + SOAP endpoints + sessions list
+│   │   ├── doctor.py         # Audio file upload + SOAP endpoints + sessions list
+│   │   │                     # (legacy WebSocket /stream-audio still defined,
+│   │   │                     #  but unused — dashboard now uses /upload-audio)
 │   │   ├── patient.py        # Report upload, analysis, PDF export, history
 │   │   ├── chatbot.py        # Website support chatbot widget
 │   │   ├── patient_chatbot.py # Medisense AI persistent patient chatbot
@@ -162,7 +177,7 @@ MediSenseAI/
 │       │
 │       ├── pages/
 │       │   ├── Login.tsx / Register.tsx        # Auth
-│       │   ├── DoctorDashboard.tsx             # Audio → SOAP workflow + Meet processing
+│       │   ├── DoctorDashboard.tsx             # Audio file upload → SOAP workflow + Meet processing
 │       │   ├── PatientDashboard.tsx            # Report → health guide
 │       │   ├── PatientChat.tsx                 # Medisense AI chatbot
 │       │   ├── SchedulePage.tsx                # Doctor + patient scheduling
@@ -174,7 +189,9 @@ MediSenseAI/
 │       │   ├── ChatbotWidget.tsx               # Floating visitor chatbot
 │       │   ├── ProtectedRoute.tsx              # Role-based route guard
 │       │   ├── ScrollToTop.tsx
-│       │   ├── doctor/       # AudioRecorder, LiveTranscript, SoapNoteEditor
+│       │   ├── doctor/       # AudioFileUpload, TranscriptView, SoapNoteEditor
+│       │   │                 # (older AudioRecorder + LiveTranscript files
+│       │   │                 #  remain on disk but are no longer imported)
 │       │   └── patient/      # ReportUploader, ReportSummary, SpecialistGuide,
 │       │                     # DietExercisePlan, PrecautionsList
 │       │
@@ -189,7 +206,9 @@ MediSenseAI/
 └── demo/
     ├── sample_reports/       # PDF lab reports for testing
     ├── sample_transcripts/   # Consultation scripts
-    └── generate_sample_reports.py
+    ├── sample_audio/         # Doctor/patient demo MP3 + ground-truth script
+    ├── generate_sample_reports.py
+    └── generate_sample_audio.py
 ```
 
 ---
@@ -199,8 +218,7 @@ MediSenseAI/
 ### Doctor Side
 | Feature | Status |
 |---------|--------|
-| Browser microphone recording | ✅ |
-| Real-time WebSocket audio streaming | ✅ |
+| Audio file upload (mp3, wav, webm, ogg, flac, m4a) | ✅ |
 | Speech-to-text (Gemini Flash via OpenRouter) | ✅ |
 | Speaker diarization (Doctor/Patient) — pause-based heuristic | ✅ |
 | Medical NER (symptoms, drugs, diagnoses) — regex extraction | ✅ |
@@ -210,6 +228,7 @@ MediSenseAI/
 | PDF export | ✅ |
 | Session history | ✅ |
 | Google Meet transcript processing | ✅ |
+| ~~Browser microphone recording with live WebSocket streaming~~ | ❌ Removed — replaced by upload flow |
 
 ### Patient Side
 | Feature | Status |
@@ -339,12 +358,14 @@ SARVAM_TTS_LANGUAGE=en-IN
 
 ## 📋 Demo Scenarios
 
-### Scenario 1 — Doctor Side (Chest Pain)
+### Scenario 1 — Doctor Side (Audio Upload)
 1. Register/login as a **doctor**
-2. Go to **Doctor Dashboard** → click **Start Recording**
-3. Read the `demo/sample_transcripts/chest_pain_consultation.txt` script aloud
-4. Click **Stop Recording** → **Generate SOAP Note**
-5. Review the AI-generated SOAP note → **Download PDF**
+2. Generate the demo audio: `pip install gTTS && python demo/generate_sample_audio.py`
+3. Go to **Doctor Dashboard** → **Upload Consultation Audio** card
+4. Select `demo/sample_audio/doctor_patient_demo.mp3` (or any consultation recording up to 20 MB)
+5. Click **Transcribe Audio** → wait for the transcript to appear
+6. Click **Generate SOAP Note** → review and edit → **Download PDF**
+7. Click **Upload Another Audio File** to start a new session
 
 ### Scenario 2 — Patient Side (Diabetes Report)
 1. Register/login as a **patient**
