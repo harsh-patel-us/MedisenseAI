@@ -265,50 +265,55 @@ async def schedule_meeting(
                     "Check that the platform Google account is configured."
                 )
 
-    session_id = generate_id()
-    row = ConsultationSession(
-        id=session_id,
-        doctor_id=user.id if organizer_role == "doctor" else None,
-        doctor_name=doctor_name,
-        patient_name=patient_name,
-        status="scheduled",
-        scheduled_at=scheduled_dt,
-        duration_minutes=payload.duration_minutes,
-        reason=payload.reason.strip(),
-        patient_email=patient_email,
-        doctor_email=doctor_email,
-        organizer_id=user.id,
-        organizer_role=organizer_role,
-        meet_link=meet_link,
-        google_event_id=event_id,
-        google_event_link=event_link,
-        google_invite_status=invite_status,
-        google_invite_error=invite_error,
-    )
+    try:
+        session_id = generate_id()
+        row = ConsultationSession(
+            id=session_id,
+            doctor_id=user.id if organizer_role == "doctor" else None,
+            doctor_name=doctor_name,
+            patient_name=patient_name,
+            status="scheduled",
+            scheduled_at=scheduled_dt,
+            duration_minutes=payload.duration_minutes,
+            reason=payload.reason.strip(),
+            patient_email=patient_email,
+            doctor_email=doctor_email,
+            organizer_id=user.id,
+            organizer_role=organizer_role,
+            meet_link=meet_link,
+            google_event_id=event_id,
+            google_event_link=event_link,
+            google_invite_status=invite_status,
+            google_invite_error=invite_error,
+        )
 
-    # If we got a Meet link, derive the conference id so the doctor dashboard
-    # can later process the transcript without an extra link-conference call.
-    if meet_link:
-        try:
-            from urllib.parse import urlparse
+        # If we got a Meet link, derive the conference id so the doctor dashboard
+        # can later process the transcript without an extra link-conference call.
+        if meet_link:
+            try:
+                from urllib.parse import urlparse
 
-            path = urlparse(meet_link).path or ""
-            conf_id = path.strip("/").split("/")[-1] if path else ""
-            if conf_id:
-                row.meet_conference_id = conf_id
-                row.processing_status = "pending"
-        except Exception:
-            pass
+                path = urlparse(meet_link).path or ""
+                conf_id = path.strip("/").split("/")[-1] if path else ""
+                if conf_id:
+                    row.meet_conference_id = conf_id
+                    row.processing_status = "pending"
+            except Exception:
+                pass
 
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
 
-    logger.info(
-        f"Consultation scheduled: session={session_id} at {payload.scheduled_at} "
-        f"(organizer={organizer_role} {user.id}, invite={invite_status})"
-    )
-    return _row_to_meeting_dto(row)
+        logger.info(
+            f"Consultation scheduled: session={session_id} at {payload.scheduled_at} "
+            f"(organizer={organizer_role} {user.id}, invite={invite_status})"
+        )
+        return _row_to_meeting_dto(row)
+    except Exception as exc:
+        logger.error(f"FATAL error in schedule_meeting: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during scheduling: {str(exc)}")
+
 
 
 @router.get("/scheduled", response_model=ScheduledListResponse)

@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     hf_token: str = os.getenv("HF_TOKEN", "")
 
     # ── Database ──────────────────────────────────────────────────────────
-    database_url: str = os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_Tz8VjDZWJB5s@ep-small-wind-anb3ehaf-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require")
+    database_url: str = os.getenv("DATABASE_URL")
 
     # ── CORS ─────────────────────────────────────────────────────────────
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")

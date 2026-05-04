@@ -13,3 +13,4 @@ conversations
 medisense.db
 tmp
 .vercel
+*.txt
