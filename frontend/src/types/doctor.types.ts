@@ -61,3 +61,9 @@ export interface SessionInfo {
   patient_identifier: string | null;
   status: string;
 }
+
+export interface UploadAudioResponse {
+  session_id: string;
+  transcript: TranscriptSegment[];
+  raw_text: string;
+}

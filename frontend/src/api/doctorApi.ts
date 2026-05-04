@@ -1,7 +1,30 @@
 import axios from 'axios';
-import type { GenerateNoteResponse, TranscriptSegment, SoapNote, SessionInfo } from '../types/doctor.types';
+import type { GenerateNoteResponse, TranscriptSegment, SoapNote, SessionInfo, UploadAudioResponse } from '../types/doctor.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+export async function uploadAudioFile(
+  file: File,
+  onUploadProgress?: (percent: number) => void,
+): Promise<UploadAudioResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await axios.post<UploadAudioResponse>(
+    `${API_BASE}/doctor/upload-audio`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000,
+      onUploadProgress: (e) => {
+        if (onUploadProgress && e.total) {
+          onUploadProgress(Math.round((e.loaded * 100) / e.total));
+        }
+      },
+    },
+  );
+  return response.data;
+}
 
 export async function generateNote(
   transcript: TranscriptSegment[],

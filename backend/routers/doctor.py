@@ -7,7 +7,7 @@ GET  /doctor/sessions      → Past consultation sessions
 """
 import json
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -16,7 +16,8 @@ from datetime import datetime
 from config import settings
 from models.doctor_models import (
     GenerateNoteRequest, GenerateNoteResponse,
-    SoapNote, MedicalEntities, ExportPdfRequest, SessionSummary
+    SoapNote, MedicalEntities, ExportPdfRequest, SessionSummary,
+    TranscriptSegment, UploadAudioResponse,
 )
 from services.transcription import transcribe_audio
 from services.diarization import diarize
@@ -24,7 +25,7 @@ from services.ner import extract_medical_entities
 from services.claude_service import generate_soap_note
 from services.pdf_export import generate_soap_pdf
 from services.auth_service import require_role
-from utils.helpers import generate_id, format_transcript_for_prompt
+from utils.helpers import generate_id, format_transcript_for_prompt, validate_file_size
 from utils.storage import save_soap_pdf
 from database import get_db, ConsultationSession, User
 
@@ -109,6 +110,98 @@ async def stream_audio(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         await websocket.close(code=1011, reason=str(e))
         _audio_buffers.pop(session_id, None)
+
+
+_ALLOWED_AUDIO_TYPES = {
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave",
+    "audio/webm", "audio/ogg", "audio/flac", "audio/m4a", "audio/mp4",
+    "audio/x-m4a",
+}
+_AUDIO_EXT_TO_MIME = {
+    "mp3": "audio/mpeg", "wav": "audio/wav", "webm": "audio/webm",
+    "ogg": "audio/ogg", "flac": "audio/flac", "m4a": "audio/mp4",
+}
+
+
+def _segments_from_transcript_text(text: str) -> list[dict]:
+    """Split a multi-line transcript into alternating DOCTOR/PATIENT segments.
+
+    The Gemini transcription prompt asks for one speaker turn per line, so we
+    treat each non-empty line as a separate turn, alternating speakers starting
+    with DOCTOR. If the model returns a single block, we fall back to a single
+    DOCTOR-labeled segment so SOAP generation still has something to work with.
+    """
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return []
+
+    segments: list[dict] = []
+    current = "DOCTOR"
+    for idx, line in enumerate(lines):
+        segments.append({
+            "speaker": current,
+            "text": line,
+            "start": float(idx),
+            "end": float(idx + 1),
+            "confidence": 0.8,
+        })
+        current = "PATIENT" if current == "DOCTOR" else "DOCTOR"
+    return segments
+
+
+@router.post("/upload-audio", response_model=UploadAudioResponse)
+async def upload_audio(
+    file: UploadFile = File(...),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Accept an audio file, transcribe it via Gemini, and return alternating
+    DOCTOR/PATIENT segments plus a fresh session id. The doctor's UI then
+    forwards these segments to /doctor/generate-note for SOAP generation."""
+    content = await file.read()
+    if not validate_file_size(len(content), settings.max_file_size_mb):
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size is {settings.max_file_size_mb} MB.",
+        )
+
+    content_type = (file.content_type or "").lower()
+    filename = file.filename or "audio"
+    if content_type not in _ALLOWED_AUDIO_TYPES:
+        ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+        guessed = _AUDIO_EXT_TO_MIME.get(ext)
+        if guessed is None:
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    "Unsupported audio type. Allowed: mp3, wav, webm, ogg, flac, m4a."
+                ),
+            )
+
+    try:
+        result = await transcribe_audio(content, settings.whisper_model)
+    except Exception as exc:
+        logger.error(f"Audio transcription failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+
+    raw_text = (result or {}).get("text", "").strip()
+    if not raw_text:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No speech could be transcribed from this audio file. "
+                "Please upload a clearer recording."
+            ),
+        )
+
+    segment_dicts = _segments_from_transcript_text(raw_text)
+    segments = [TranscriptSegment(**seg) for seg in segment_dicts]
+    session_id = generate_id()
+
+    return UploadAudioResponse(
+        session_id=session_id,
+        transcript=segments,
+        raw_text=raw_text,
+    )
 
 
 @router.post("/generate-note", response_model=GenerateNoteResponse)

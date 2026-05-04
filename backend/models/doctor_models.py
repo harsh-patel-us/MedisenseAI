@@ -80,3 +80,9 @@ class SessionSummary(BaseModel):
     doctor_name: Optional[str]
     patient_identifier: Optional[str]
     status: str
+
+
+class UploadAudioResponse(BaseModel):
+    session_id: str
+    transcript: List[TranscriptSegment]
+    raw_text: str

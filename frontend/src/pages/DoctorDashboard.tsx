@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import AudioRecorder from '../components/doctor/AudioRecorder';
-import LiveTranscript from '../components/doctor/LiveTranscript';
+// Live recording flow has been replaced with audio-file upload — the
+// useAudioRecorder hook, AudioRecorder mic UI, and LiveTranscript display are
+// no longer used. Imports kept commented for reference.
+// import { useAudioRecorder } from '../hooks/useAudioRecorder';
+// import AudioRecorder from '../components/doctor/AudioRecorder';
+// import LiveTranscript from '../components/doctor/LiveTranscript';
+import AudioFileUpload from '../components/doctor/AudioFileUpload';
+import TranscriptView from '../components/doctor/TranscriptView';
 import SoapNoteEditor from '../components/doctor/SoapNoteEditor';
 import { generateNote } from '../api/doctorApi';
 import {
@@ -11,19 +16,25 @@ import {
   getProcessStatus,
 } from '../api/meetApi';
 import type { UnprocessedSession, ProcessStatusResponse } from '../api/meetApi';
-import type { SoapNote, MedicalEntities } from '../types/doctor.types';
+import type { SoapNote, MedicalEntities, TranscriptSegment } from '../types/doctor.types';
 
 export default function DoctorDashboard() {
   const navigate = useNavigate();
-  const {
-    isRecording, duration, transcript, sessionId, error,
-    startRecording, stopRecording, clearTranscript,
-  } = useAudioRecorder();
 
+  const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [soapNote, setSoapNote] = useState<SoapNote | null>(null);
   const [entities, setEntities] = useState<MedicalEntities | null>(null);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+
+  const handleTranscribed = (segments: TranscriptSegment[], newSessionId: string) => {
+    setTranscript(segments);
+    setSessionId(newSessionId);
+    setSoapNote(null);
+    setEntities(null);
+    setGenError(null);
+  };
 
   const handleGenerateNote = async () => {
     if (transcript.length === 0) return;
@@ -43,7 +54,8 @@ export default function DoctorDashboard() {
   };
 
   const handleNewSession = () => {
-    clearTranscript();
+    setTranscript([]);
+    setSessionId(null);
     setSoapNote(null);
     setEntities(null);
     setGenError(null);
@@ -146,7 +158,7 @@ export default function DoctorDashboard() {
             🩺 Doctor Dashboard
           </h1>
           <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
-            Record consultations or schedule a Google Meet with AI transcription
+            Upload a consultation audio file or schedule a Google Meet — both flow into AI-generated SOAP notes
           </p>
         </div>
         <button
@@ -161,22 +173,18 @@ export default function DoctorDashboard() {
 
       {/* Two-column layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', alignItems: 'start' }}>
-        {/* Left: Recorder + Transcript */}
+        {/* Left: Audio upload + transcript */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <AudioRecorder
-            isRecording={isRecording}
-            duration={duration}
-            error={error}
-            onStart={startRecording}
-            onStop={stopRecording}
+          <AudioFileUpload
+            onTranscribed={handleTranscribed}
             onClear={handleNewSession}
             hasTranscript={transcript.length > 0}
           />
 
-          <LiveTranscript segments={transcript} isRecording={isRecording} />
+          <TranscriptView segments={transcript} />
 
           {/* Generate SOAP Note Button */}
-          {transcript.length > 0 && !isRecording && (
+          {transcript.length > 0 && (
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
                 className="btn-primary"
@@ -266,8 +274,8 @@ export default function DoctorDashboard() {
                 SOAP Note Will Appear Here
               </h3>
               <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: '320px' }}>
-                Record a consultation, then click "Generate SOAP Note" to create
-                an AI-assisted clinical note.
+                Upload a consultation audio file, then click "Generate SOAP Note"
+                to create an AI-assisted clinical note.
               </p>
             </div>
           )}
