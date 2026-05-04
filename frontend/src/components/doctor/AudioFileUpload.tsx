@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { uploadAudioFile } from '../../api/doctorApi';
 import type { TranscriptSegment } from '../../types/doctor.types';
 
@@ -10,11 +10,18 @@ interface AudioFileUploadProps {
 
 const ACCEPTED = '.mp3,.wav,.webm,.ogg,.flac,.m4a,audio/*';
 const MAX_MB = 20;
+const AUDIO_EXTS = ['mp3', 'wav', 'webm', 'ogg', 'flac', 'm4a', 'aac', 'opus'];
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isAudioFile(file: File): boolean {
+  if (file.type && file.type.toLowerCase().startsWith('audio/')) return true;
+  const ext = file.name.toLowerCase().split('.').pop() || '';
+  return AUDIO_EXTS.includes(ext);
 }
 
 export default function AudioFileUpload({ onTranscribed, onClear, hasTranscript }: AudioFileUploadProps) {
@@ -31,7 +38,15 @@ export default function AudioFileUpload({ onTranscribed, onClear, hasTranscript 
     e.target.value = '';
     if (!file) return;
 
+    if (!isAudioFile(file)) {
+      setSelectedFile(null);
+      setError(
+        `"${file.name}" is not an audio file. Please upload an audio recording (mp3, wav, webm, ogg, flac, or m4a).`,
+      );
+      return;
+    }
     if (file.size > MAX_MB * 1024 * 1024) {
+      setSelectedFile(null);
       setError(`File too large. Max ${MAX_MB} MB.`);
       return;
     }
@@ -39,6 +54,26 @@ export default function AudioFileUpload({ onTranscribed, onClear, hasTranscript 
     setSelectedFile(file);
     setProgress(0);
   };
+
+  const handleCancelFile = () => {
+    setSelectedFile(null);
+    setProgress(0);
+    setError(null);
+  };
+
+  // When the parent resets the session (e.g. dashboard "New Session" button),
+  // hasTranscript flips back to false — drop the locally-selected file too so
+  // the picker returns to its empty state. We only react to true -> false
+  // transitions so that picking a fresh file doesn't immediately clear it.
+  const prevHasTranscript = useRef(hasTranscript);
+  useEffect(() => {
+    if (prevHasTranscript.current && !hasTranscript) {
+      setSelectedFile(null);
+      setProgress(0);
+      setError(null);
+    }
+    prevHasTranscript.current = hasTranscript;
+  }, [hasTranscript]);
 
   const handleUpload = async () => {
     if (!selectedFile) return;
@@ -141,10 +176,11 @@ export default function AudioFileUpload({ onTranscribed, onClear, hasTranscript 
           {!uploading && !hasTranscript && (
             <button
               className="btn-secondary"
-              onClick={() => setSelectedFile(null)}
+              onClick={handleCancelFile}
               style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+              id="cancel-file-btn"
             >
-              Change
+              ✕ Cancel
             </button>
           )}
         </div>
@@ -194,8 +230,8 @@ export default function AudioFileUpload({ onTranscribed, onClear, hasTranscript 
           </button>
         )}
         {hasTranscript && !uploading && (
-          <button className="btn-secondary" onClick={handleClearLocal} id="clear-audio-btn">
-            ✕ Clear &amp; Upload Another
+          <button className="btn-primary" onClick={handleClearLocal} id="upload-another-btn">
+            📤 Upload Another Audio File
           </button>
         )}
       </div>
