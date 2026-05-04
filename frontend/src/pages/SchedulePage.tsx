@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { listScheduledMeetings, scheduleConsultation } from '../api/consultationApi';
-import { linkConference } from '../api/meetApi';
+import { useNavigate } from 'react-router-dom';
+import {
+  listScheduledMeetings,
+  linkConference,
+  scheduleMeeting,
+} from '../api/meetApi';
+import type { ScheduledMeeting } from '../api/meetApi';
 import { useAuth } from '../contexts/AuthContext';
-import type { ScheduledMeeting } from '../types/consultation.types';
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -23,23 +26,19 @@ function formatDateTime(iso: string): string {
   }
 }
 
-function buildRoomUrl(roomId: string): string {
-  const { protocol, host } = window.location;
-  return `${protocol}//${host}/consultation/room/${roomId}`;
-}
-
-function buildIcs(meeting: ScheduledMeeting, joinUrl: string): string {
+function buildIcs(meeting: ScheduledMeeting): string {
   const start = new Date(meeting.scheduled_at);
   const end = new Date(start.getTime() + meeting.duration_minutes * 60_000);
   const fmt = (d: Date) =>
     d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 
+  const joinLine = meeting.meet_link ? `\\nGoogle Meet: ${meeting.meet_link}` : '';
   const description =
     `Join your MediSense AI consultation.\\n\\n` +
     `Doctor: ${meeting.doctor_name}\\n` +
     `Patient: ${meeting.patient_name}\\n` +
     (meeting.reason ? `Reason: ${meeting.reason}\\n` : '') +
-    `\\nJoin link: ${joinUrl}\\nRoom ID: ${meeting.room_id}`;
+    joinLine;
 
   return [
     'BEGIN:VCALENDAR',
@@ -48,44 +47,47 @@ function buildIcs(meeting: ScheduledMeeting, joinUrl: string): string {
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
-    `UID:${meeting.room_id}@medisense.ai`,
+    `UID:${meeting.session_id}@medisense.ai`,
     `DTSTAMP:${fmt(new Date())}`,
     `DTSTART:${fmt(start)}`,
     `DTEND:${fmt(end)}`,
     `SUMMARY:MediSense Consultation — ${meeting.doctor_name} & ${meeting.patient_name}`,
     `DESCRIPTION:${description}`,
-    `URL:${joinUrl}`,
-    `LOCATION:${joinUrl}`,
+    meeting.meet_link ? `URL:${meeting.meet_link}` : '',
+    meeting.meet_link ? `LOCATION:${meeting.meet_link}` : '',
     'END:VEVENT',
     'END:VCALENDAR',
-  ].join('\r\n');
+  ].filter(Boolean).join('\r\n');
 }
 
-function downloadIcs(meeting: ScheduledMeeting, joinUrl: string) {
-  const ics = buildIcs(meeting, joinUrl);
+function downloadIcs(meeting: ScheduledMeeting) {
+  const ics = buildIcs(meeting);
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `medisense-consultation-${meeting.room_id}.ics`;
+  a.download = `medisense-consultation-${meeting.session_id}.ics`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-function buildMailto(meeting: ScheduledMeeting, joinUrl: string): string {
+function buildMailto(meeting: ScheduledMeeting): string {
   const to = meeting.patient_email || '';
   const subject = encodeURIComponent(
     `Your consultation with ${meeting.doctor_name} — ${formatDateTime(meeting.scheduled_at)}`,
   );
+  const joinLine = meeting.meet_link
+    ? `Join the Google Meet at the scheduled time:\n${meeting.meet_link}\n\n`
+    : '';
   const body = encodeURIComponent(
     `Hello ${meeting.patient_name},\n\n` +
       `Your video consultation is scheduled for ${formatDateTime(meeting.scheduled_at)} ` +
       `(${meeting.duration_minutes} minutes) with ${meeting.doctor_name}.\n\n` +
-      `Join using this link:\n${joinUrl}\n\n` +
-      `Room ID: ${meeting.room_id}\n\n` +
+      joinLine +
       (meeting.reason ? `Reason for visit: ${meeting.reason}\n\n` : '') +
-      `During the call, the conversation is live-transcribed. After the call ends, ` +
-      `you'll receive a patient-friendly summary and your doctor will receive a SOAP note.\n\n` +
+      `During the call, the conversation is live-transcribed by Google Meet. After the ` +
+      `call ends, your doctor will receive an AI-generated SOAP note and you'll be sent ` +
+      `a patient-friendly summary.\n\n` +
       `— MediSense AI`,
   );
   return `mailto:${to}?subject=${subject}&body=${body}`;
@@ -186,7 +188,7 @@ export default function SchedulePage() {
       // The "Patient Email" field always carries the OTHER party's email —
       // for the doctor flow that's the patient, for the patient flow it's
       // the doctor. The backend treats this address as the Calendar attendee.
-      const meeting = await scheduleConsultation({
+      const meeting = await scheduleMeeting({
         doctor_name: form.doctor_name.trim(),
         patient_name: form.patient_name.trim(),
         patient_email: isDoctor ? enteredEmail : undefined,
@@ -196,13 +198,10 @@ export default function SchedulePage() {
         reason: form.reason.trim(),
       });
       setCreated(meeting);
-      // If a Google Meet link was created, link the conference ID to the
-      // ConsultationSession so the Doctor Dashboard can list it for
-      // transcript processing.
+      // The backend already extracted the conference id from the Meet link
+      // when the calendar invite succeeded. Re-issue link-conference here as
+      // a defensive backfill in case extraction was skipped.
       if (meeting.meet_link && meeting.session_id) {
-        // Extract conference ID from the meet link. Google Meet links look
-        // like https://meet.google.com/abc-defg-hij — the last segment is
-        // the conference id.
         try {
           const url = new URL(meeting.meet_link);
           const confId = url.pathname.split('/').filter(Boolean).pop() || '';
@@ -215,7 +214,6 @@ export default function SchedulePage() {
             });
           }
         } catch (linkErr) {
-          // Non-fatal — the doctor can still link it manually from the dashboard.
           console.warn('Could not auto-link Meet conference:', linkErr);
         }
       }
@@ -257,7 +255,7 @@ export default function SchedulePage() {
             fontSize: '0.78rem', fontWeight: 700, color: 'var(--brand-teal)',
             marginBottom: 18, textTransform: 'uppercase', letterSpacing: '0.6px',
           }}>
-            📅 Video Consultation
+            📅 Google Meet Consultation
           </div>
           <h1 style={{
             fontSize: 'clamp(1.8rem, 4vw, 2.6rem)', fontWeight: 900, lineHeight: 1.2,
@@ -267,8 +265,8 @@ export default function SchedulePage() {
             Schedule a Live Consultation
           </h1>
           <p style={{ color: 'var(--text-secondary)', maxWidth: 600, margin: '0 auto', lineHeight: 1.6 }}>
-            Pick a time, share the link. Doctor and patient meet live with real-time captions,
-            and an AI-generated SOAP note arrives after the call ends.
+            Pick a time and we'll create a Google Calendar event with a Meet link for both of you.
+            After the call, the transcript can be processed into a SOAP note from your dashboard.
           </p>
         </div>
 
@@ -279,11 +277,9 @@ export default function SchedulePage() {
             {created ? (
               <SuccessPanel
                 meeting={created}
-                joinUrl={buildRoomUrl(created.room_id)}
                 copyOk={copyOk}
                 onCopy={copyLink}
                 onReset={resetForm}
-                onJoinNow={() => navigate(`/consultation/room/${created.room_id}?role=doctor`)}
               />
             ) : (
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -320,11 +316,13 @@ export default function SchedulePage() {
                 </div>
 
                 <div>
-                  <label style={labelStyle}>Patient Email (optional)</label>
+                  <label style={labelStyle}>
+                    {isDoctor ? 'Patient Email (optional)' : 'Doctor Email (optional)'}
+                  </label>
                   <input
                     type="email"
                     style={inputStyle}
-                    placeholder="patient@example.com"
+                    placeholder={isDoctor ? 'patient@example.com' : 'doctor@example.com'}
                     value={form.patient_email}
                     onChange={e => setForm(f => ({ ...f, patient_email: e.target.value }))}
                     onFocus={e => (e.target.style.borderColor = 'var(--brand-teal)')}
@@ -413,10 +411,10 @@ export default function SchedulePage() {
                 What Happens Next
               </h3>
               {[
-                { n: 1, t: 'Share the link', d: 'Copy the shareable link or download the calendar invite after scheduling.' },
-                { n: 2, t: 'Both parties join', d: 'At the scheduled time, doctor and patient open the link — the video call connects automatically.' },
-                { n: 3, t: 'Live captions', d: 'Every word is transcribed and speaker-labeled in real time during the conversation.' },
-                { n: 4, t: 'AI SOAP summary', d: 'When the call ends, the LLM generates a clinical SOAP note and a patient-friendly explanation.' },
+                { n: 1, t: 'Calendar invite goes out', d: 'Both parties get a Google Calendar event with a Meet link emailed automatically.' },
+                { n: 2, t: 'Both parties join Meet', d: 'At the scheduled time, click the Meet link in the invite — no extra app or code needed.' },
+                { n: 3, t: 'Meet records the transcript', d: 'Google Meet captures and timestamps the conversation while the call is live.' },
+                { n: 4, t: 'AI SOAP summary', d: 'After the call, process the Meet transcript from the doctor dashboard to generate a SOAP note.' },
               ].map(step => (
                 <div key={step.n} style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
                   <div style={{
@@ -459,23 +457,31 @@ export default function SchedulePage() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto' }}>
                   {upcoming.map(m => (
-                    <UpcomingCard key={m.room_id} meeting={m} />
+                    <UpcomingCard key={m.session_id} meeting={m} />
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Already have a link */}
-            <div style={{
-              padding: '16px 20px', borderRadius: 12,
-              background: 'rgba(5,174,187,0.06)', border: '1px solid var(--border-subtle)',
-              fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center',
-            }}>
-              Already have a Room ID?{' '}
-              <Link to="/consultation/join" style={{ color: 'var(--brand-teal)', fontWeight: 600 }}>
-                Join an existing call →
-              </Link>
-            </div>
+            {isDoctor && (
+              <div style={{
+                padding: '16px 20px', borderRadius: 12,
+                background: 'rgba(5,174,187,0.06)', border: '1px solid var(--border-subtle)',
+                fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center',
+              }}>
+                Already finished a call?{' '}
+                <button
+                  onClick={() => navigate('/doctor#meet-processing-section')}
+                  style={{
+                    background: 'transparent', border: 'none',
+                    color: 'var(--brand-teal)', fontWeight: 600, cursor: 'pointer',
+                    padding: 0, fontSize: '0.82rem',
+                  }}
+                >
+                  Process its Meet transcript →
+                </button>
+              </div>
+            )}
 
           </div>
         </div>
@@ -487,14 +493,12 @@ export default function SchedulePage() {
 /* ── Success panel ───────────────────────────────────────────────────── */
 
 function SuccessPanel({
-  meeting, joinUrl, copyOk, onCopy, onReset, onJoinNow,
+  meeting, copyOk, onCopy, onReset,
 }: {
   meeting: ScheduledMeeting;
-  joinUrl: string;
   copyOk: boolean;
   onCopy: (url: string) => void;
   onReset: () => void;
-  onJoinNow: () => void;
 }) {
   return (
     <div>
@@ -502,7 +506,9 @@ function SuccessPanel({
         <div style={{ fontSize: '2.8rem', marginBottom: 10 }}>✅</div>
         <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: 6 }}>Consultation Scheduled!</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-          Share the link below with {meeting.patient_name}. Both of you can join at the scheduled time.
+          {meeting.google_invite_status === 'sent'
+            ? `A Google Calendar invite has been sent to ${meeting.patient_name}. Both of you can join via the Meet link below.`
+            : `Share the Meet link with ${meeting.patient_name}. Both of you can join at the scheduled time.`}
         </p>
       </div>
 
@@ -525,52 +531,42 @@ function SuccessPanel({
         )}
       </div>
 
-      {/* Room ID + link */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Room ID</div>
-        <div style={{
-          fontFamily: 'monospace', fontSize: '1.4rem', fontWeight: 800, letterSpacing: '4px',
-          padding: '12px 16px', borderRadius: 10, textAlign: 'center',
-          background: 'rgba(15,30,60,0.6)', border: '1px solid var(--border-subtle)',
-          color: 'var(--brand-teal)',
-        }}>
-          {meeting.room_id}
+      {/* Meet link */}
+      {meeting.meet_link && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={labelStyle}>Google Meet Link</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              readOnly
+              value={meeting.meet_link}
+              onFocus={e => e.target.select()}
+              style={{ ...inputStyle, fontSize: '0.82rem', flex: 1 }}
+            />
+            <button
+              onClick={() => onCopy(meeting.meet_link!)}
+              className="btn-secondary"
+              style={{ padding: '10px 16px', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+            >
+              {copyOk ? '✓ Copied' : '📋 Copy'}
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <div style={labelStyle}>Shareable Link</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            readOnly
-            value={joinUrl}
-            onFocus={e => e.target.select()}
-            style={{ ...inputStyle, fontSize: '0.82rem', flex: 1 }}
-          />
-          <button
-            onClick={() => onCopy(joinUrl)}
-            className="btn-secondary"
-            style={{ padding: '10px 16px', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
-          >
-            {copyOk ? '✓ Copied' : '📋 Copy'}
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Google Meet / Calendar invite status */}
       <GoogleInviteSummary meeting={meeting} />
 
       {/* Action buttons */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
         <button
-          onClick={() => downloadIcs(meeting, joinUrl)}
+          onClick={() => downloadIcs(meeting)}
           className="btn-secondary"
           style={{ justifyContent: 'center', padding: '12px', fontSize: '0.85rem' }}
         >
           📆 Add to Calendar
         </button>
         <a
-          href={buildMailto(meeting, joinUrl)}
+          href={buildMailto(meeting)}
           style={{ textDecoration: 'none' }}
           title="Opens a pre-filled draft in your default email app"
         >
@@ -584,21 +580,22 @@ function SuccessPanel({
         </a>
       </div>
 
-      <p style={{
-        fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5,
-        marginBottom: 14, textAlign: 'center',
-      }}>
-        💡 "Open Email Draft" opens your email app with the invitation pre-filled — you'll still need
-        to hit Send. MediSense does not send emails directly.
-      </p>
-
-      <button
-        onClick={onJoinNow}
-        className="btn-primary"
-        style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: '0.95rem', marginBottom: 8 }}
-      >
-        🎥 Open Call Now (as Doctor)
-      </button>
+      {meeting.meet_link && (
+        <a
+          href={meeting.meet_link}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ textDecoration: 'none' }}
+        >
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: '0.95rem', marginBottom: 8 }}
+          >
+            📹 Open Google Meet Now
+          </button>
+        </a>
+      )}
 
       <button
         onClick={onReset}
@@ -617,8 +614,6 @@ function SuccessPanel({
 /* ── Upcoming meeting card ───────────────────────────────────────────── */
 
 function UpcomingCard({ meeting }: { meeting: ScheduledMeeting }) {
-  const navigate = useNavigate();
-  const joinUrl = buildRoomUrl(meeting.room_id);
   const [copied, setCopied] = useState(false);
 
   const start = new Date(meeting.scheduled_at).getTime();
@@ -628,8 +623,9 @@ function UpcomingCard({ meeting }: { meeting: ScheduledMeeting }) {
   const isSoon = minutesUntil > 0 && minutesUntil <= 15;
 
   async function copy() {
+    if (!meeting.meet_link) return;
     try {
-      await navigator.clipboard.writeText(joinUrl);
+      await navigator.clipboard.writeText(meeting.meet_link);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch { /* ignore */ }
@@ -662,45 +658,43 @@ function UpcomingCard({ meeting }: { meeting: ScheduledMeeting }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => navigate(`/consultation/room/${meeting.room_id}?role=doctor`)}
-          className="btn-secondary"
-          style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-        >
-          🩺 Join as Doctor
-        </button>
-        <button
-          onClick={() => navigate(`/consultation/room/${meeting.room_id}?role=patient`)}
-          className="btn-secondary"
-          style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-        >
-          🧬 Join as Patient
-        </button>
-        {meeting.meet_link && (
+        {meeting.meet_link ? (
           <a
             href={meeting.meet_link}
             target="_blank"
             rel="noopener noreferrer"
             style={{ textDecoration: 'none' }}
           >
+            <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}>
+              📹 Join Google Meet
+            </button>
+          </a>
+        ) : (
+          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+            No Meet link — connect Google Calendar to add one.
+          </span>
+        )}
+        {meeting.meet_link && (
+          <button
+            onClick={copy}
+            className="btn-secondary"
+            style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+          >
+            {copied ? '✓' : '📋'} Copy Link
+          </button>
+        )}
+        {meeting.google_event_link && (
+          <a
+            href={meeting.google_event_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: 'none' }}
+          >
             <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}>
-              📹 Google Meet
+              📅 Calendar
             </button>
           </a>
         )}
-        <button
-          onClick={copy}
-          className="btn-secondary"
-          style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-        >
-          {copied ? '✓' : '📋'} Copy Link
-        </button>
-        <span style={{
-          fontFamily: 'monospace', fontSize: '0.7rem', color: 'var(--text-muted)',
-          padding: '6px 8px', letterSpacing: '1px', marginLeft: 'auto',
-        }}>
-          {meeting.room_id}
-        </span>
       </div>
     </div>
   );
@@ -723,40 +717,8 @@ function GoogleInviteSummary({ meeting }: { meeting: ScheduledMeeting }) {
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4ade80', marginBottom: 8 }}>
           ✅ Google Calendar invite sent
         </div>
-        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 10 }}>
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
           Both parties just got an email from Google with the event and Meet link.
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <a
-            href={meeting.meet_link}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: 'none', flex: '1 1 auto' }}
-          >
-            <button
-              type="button"
-              className="btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '10px', fontSize: '0.85rem' }}
-            >
-              📹 Join Google Meet
-            </button>
-          </a>
-          {meeting.google_event_link && (
-            <a
-              href={meeting.google_event_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ textDecoration: 'none' }}
-            >
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ padding: '10px 14px', fontSize: '0.85rem' }}
-              >
-                📅 Open in Calendar
-              </button>
-            </a>
-          )}
         </div>
       </div>
     );
@@ -776,12 +738,25 @@ function GoogleInviteSummary({ meeting }: { meeting: ScheduledMeeting }) {
         }}
       >
         ⚠️ {meeting.google_invite_error ||
-          'Google Calendar invite could not be sent. The room link below still works.'}
+          'Google Calendar invite could not be sent. Connect your Google account to enable Meet links.'}
       </div>
     );
   }
 
-  // No Calendar invite was attempted (e.g. patient_email left blank). Just
-  // show nothing — the room link below is enough.
-  return null;
+  // No Calendar invite was attempted (e.g. email left blank).
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        borderRadius: 12,
+        background: 'rgba(5,174,187,0.06)',
+        border: '1px solid var(--border-subtle)',
+        marginBottom: 16,
+        fontSize: '0.82rem',
+        color: 'var(--text-secondary)',
+      }}
+    >
+      ℹ️ Connect Google Calendar to auto-generate a Meet link and email both parties.
+    </div>
+  );
 }

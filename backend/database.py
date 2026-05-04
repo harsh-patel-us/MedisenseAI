@@ -125,6 +125,24 @@ class ConsultationSession(Base):
     processing_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     processing_task_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # ── Scheduling fields (Google Calendar / Meet) ──────────────────────
+    # Populated when a user schedules a consultation through /meet/schedule.
+    # The Meet link is the only join surface; there is no in-app room.
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    patient_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    doctor_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    organizer_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
+    organizer_role: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    meet_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_event_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_invite_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_invite_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
 
 class ChatbotSession(Base):
     """Persistent transcript for the website chatbot widget.
@@ -308,6 +326,18 @@ async def init_db():
                 ("meet_conference_id", "VARCHAR"),
                 ("processing_status", "VARCHAR"),
                 ("processing_task_id", "VARCHAR"),
+                ("scheduled_at", "TIMESTAMP"),
+                ("duration_minutes", "INTEGER"),
+                ("reason", "TEXT"),
+                ("patient_email", "VARCHAR"),
+                ("doctor_email", "VARCHAR"),
+                ("organizer_id", "VARCHAR"),
+                ("organizer_role", "VARCHAR"),
+                ("meet_link", "VARCHAR"),
+                ("google_event_id", "VARCHAR"),
+                ("google_event_link", "VARCHAR"),
+                ("google_invite_status", "VARCHAR"),
+                ("google_invite_error", "TEXT"),
             ],
             "patient_analyses": [
                 ("patient_id", "VARCHAR"),

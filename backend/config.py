@@ -8,6 +8,10 @@ from `prompts` instead (e.g. `from prompts import SAFETY_SYSTEM_MESSAGE`).
 """
 from functools import lru_cache
 import os
+from dotenv import load_dotenv
+
+# Load environment variables before setting class attributes
+load_dotenv()
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,7 +45,7 @@ class Settings(BaseSettings):
     vision_model: str = os.getenv("VISION_MODEL", "openai/gpt-4o-mini")
 
     # ── App ───────────────────────────────────────────────────────────────
-    app_host: str = os.getenv("APP_HOST", "0.0.0.0")
+    app_host: str = os.getenv("APP_HOST", "127.0.0.1")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
     environment: str = os.getenv("ENVIRONMENT", "development")
 
@@ -55,7 +59,7 @@ class Settings(BaseSettings):
     hf_token: str = os.getenv("HF_TOKEN", "")
 
     # ── Database ──────────────────────────────────────────────────────────
-    database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./medisense.db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_Tz8VjDZWJB5s@ep-small-wind-anb3ehaf-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require")
 
     # ── CORS ─────────────────────────────────────────────────────────────
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -69,7 +73,7 @@ class Settings(BaseSettings):
     medical_model: str = os.getenv("MEDICAL_MODEL", "openai/gpt-4o-mini")
 
     # ── Auth / JWT ───────────────────────────────────────────────────────
-    jwt_secret: str = os.getenv("JWT_SECRET", "change-me-in-prod-medisense-dev-secret")
+    jwt_secret: str = os.getenv("JWT_SECRET")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expires_minutes: int = int(os.getenv("JWT_EXPIRES_MINUTES", "10080"))
 

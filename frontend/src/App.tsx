@@ -3,8 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, us
 import type { ReactNode } from 'react';
 import DoctorDashboard from './pages/DoctorDashboard';
 import PatientDashboard from './pages/PatientDashboard';
-import ConsultationRoom from './pages/ConsultationRoom';
-import JoinConsultation from './pages/JoinConsultation';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
 import SchedulePage from './pages/SchedulePage';
@@ -123,14 +121,6 @@ function Navbar() {
                 📅 Schedule
               </button>
             </Link>
-            <Link to="/consultation/join">
-              <button
-                className={location.pathname === '/consultation/join' ? 'btn-primary' : 'btn-secondary'}
-                style={{ padding: '8px 16px', fontSize: '0.82rem' }}
-              >
-                🎥 Join Call
-              </button>
-            </Link>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '6px 12px', borderRadius: 8,
@@ -217,9 +207,6 @@ function Navbar() {
                 <Link to="/consultation/schedule" onClick={() => setMobileOpen(false)}>
                   <button className="btn-secondary" style={{ fontSize: '0.82rem' }}>📅 Schedule</button>
                 </Link>
-                <Link to="/consultation/join" onClick={() => setMobileOpen(false)}>
-                  <button className="btn-secondary" style={{ fontSize: '0.82rem' }}>🎥 Join Call</button>
-                </Link>
                 <button
                   className="btn-secondary"
                   onClick={() => { setMobileOpen(false); handleLogout(); }}
@@ -301,16 +288,16 @@ const demoContent: Record<DemoKey, {
     label: 'Video Call',
     icon: '🎥',
     color: '#a78bfa',
-    heading: 'Consult. Record. Done.',
+    heading: 'Schedule. Meet. Done.',
     intro:
-      'Browser-native WebRTC. Patients join with a six-character code — no downloads. Transcript and SOAP note persist to the doctor\'s dashboard automatically.',
-    panelTitle: 'Consult room · A4F9-88C2',
+      'Schedule a consultation and we drop a Google Meet link into both calendars. After the call, process the Meet transcript into a SOAP note from your dashboard in one click.',
+    panelTitle: 'Google Meet · scheduled consult',
     lines: [
-      { text: 'Room A4F9-88C2 · 2 participants · Active' },
-      { text: '→ Doctor connected (00:00)' },
-      { text: '→ Patient connected (00:04)' },
-      { text: '→ Transcript streaming · Audio 48 kHz' },
+      { text: '→ Calendar invite sent to patient@example.com' },
+      { text: '→ Doctor opens Meet link (00:00)' },
+      { text: '→ Patient joins (00:04) · Meet captions on' },
       { text: '— Call ended 12:34 —', emphasis: true },
+      { label: 'Process', text: 'Meet transcript → diarize → NER → SOAP draft.' },
       { label: 'Saved', text: 'SOAP draft · Transcript · Session PDF' },
       { label: 'Next', text: 'Doctor reviews → 1-click export to chart.' },
     ],
@@ -496,7 +483,7 @@ const landingFaq = [
   },
   {
     q: 'Can I use it for telehealth / video calls?',
-    a: 'Yes. WebRTC video consultations are built in. Patients join with a 6-character code from any browser — no app install. Transcription and SOAP generation work identically to in-person calls.',
+    a: 'Yes. Schedule a consultation and we create a Google Calendar event with a Meet link for both parties. After the call, process the Meet transcript from your dashboard to generate a SOAP note automatically.',
   },
   {
     q: 'What about my existing EHR?',
@@ -733,7 +720,7 @@ function LandingPage() {
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24,
           }}>
             {[
-              { icon: '🎥', title: 'Live Video Consultations', desc: 'Secure WebRTC video calls between doctor and patient, with in-browser join and no downloads.', color: '#22d3ee' },
+              { icon: '🎥', title: 'Live Video Consultations', desc: 'Schedule consultations with auto-generated Google Meet links and calendar invites for both parties.', color: '#22d3ee' },
               { icon: '🎤', title: 'Real-Time Transcription', desc: 'Every word captured and speaker-labeled as the conversation happens. No manual notes required.', color: '#60a5fa' },
               { icon: '📋', title: 'AI-Generated SOAP Notes', desc: 'Structured clinical notes produced automatically at end of call — editable, exportable, chart-ready.', color: '#a78bfa' },
               { icon: '🧪', title: 'Lab Report Analysis', desc: 'Patients upload PDFs and get plain-English explanations, flagged abnormalities, and next steps.', color: '#4ade80' },
@@ -802,7 +789,7 @@ function LandingPage() {
               </div>
 
               {[
-                { n: 1, t: 'Start a Session', d: 'Open the Doctor Dashboard and begin recording or launch a video consultation.' },
+                { n: 1, t: 'Start a Session', d: 'Open the Doctor Dashboard and begin recording, or schedule a Google Meet consultation.' },
                 { n: 2, t: 'Talk Naturally', d: 'Conduct the consultation as you normally would. AI transcribes and labels every speaker in real time.' },
                 { n: 3, t: 'Review AI SOAP Note', d: 'End the call to receive structured Subjective, Objective, Assessment, and Plan — edit as needed.' },
                 { n: 4, t: 'Export & Share', d: 'Download a chart-ready PDF or copy to clipboard for your EHR system.' },
@@ -1046,17 +1033,15 @@ function Footer() {
       ? [
         { to: '/doctor', label: 'Doctor Dashboard' },
         { to: '/consultation/schedule', label: 'Schedule a Call' },
-        { to: '/consultation/join', label: 'Join a Call' },
       ]
       : [
         { to: '/patient', label: 'Patient Dashboard' },
-        { to: '/consultation/join', label: 'Join a Call' },
+        { to: '/consultation/schedule', label: 'Schedule a Call' },
       ]
     : [
       { to: '/doctor', label: 'Doctor Portal' },
       { to: '/patient', label: 'Patient Portal' },
       { to: '/consultation/schedule', label: 'Schedule a Call' },
-      { to: '/consultation/join', label: 'Join a Call' },
     ];
 
   // Marketing links hidden from logged-in users.
@@ -1239,22 +1224,6 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SchedulePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/consultation/join"
-            element={
-              <ProtectedRoute>
-                <JoinConsultation />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/consultation/room/:roomId"
-            element={
-              <ProtectedRoute>
-                <ConsultationRoom />
               </ProtectedRoute>
             }
           />

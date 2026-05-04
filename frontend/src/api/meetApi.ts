@@ -1,13 +1,42 @@
 import axios from 'axios';
+import type { GoogleInviteStatus } from '../types/consultation.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
+export interface ScheduleMeetingRequest {
+  doctor_name: string;
+  patient_name: string;
+  patient_email?: string;
+  doctor_email?: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  reason: string;
+}
+
+export interface ScheduledMeeting {
+  session_id: string;
+  doctor_name: string;
+  patient_name: string;
+  patient_email?: string | null;
+  doctor_email?: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  reason: string;
+  status: string;
+  created_at: string;
+  organizer_role?: 'doctor' | 'patient' | null;
+  meet_link?: string | null;
+  google_event_id?: string | null;
+  google_event_link?: string | null;
+  google_invite_status?: GoogleInviteStatus;
+  google_invite_error?: string | null;
+}
+
 export interface LinkConferenceRequest {
   session_id: string;
   meet_conference_id: string;
-  room_id?: string | null;
   patient_name?: string | null;
   doctor_name?: string | null;
 }
@@ -56,6 +85,23 @@ export interface UnprocessedSession {
 }
 
 /* ── API calls ─────────────────────────────────────────────────────── */
+
+export async function scheduleMeeting(
+  payload: ScheduleMeetingRequest,
+): Promise<ScheduledMeeting> {
+  const { data } = await axios.post<ScheduledMeeting>(
+    `${API_BASE}/meet/schedule`,
+    payload,
+  );
+  return data;
+}
+
+export async function listScheduledMeetings(): Promise<ScheduledMeeting[]> {
+  const { data } = await axios.get<{ meetings: ScheduledMeeting[] }>(
+    `${API_BASE}/meet/scheduled`,
+  );
+  return data.meetings || [];
+}
 
 export async function linkConference(
   payload: LinkConferenceRequest,

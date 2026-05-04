@@ -11,7 +11,6 @@ from database import init_db
 from routers import (
     auth,
     chatbot,
-    consultation,
     doctor,
     google_oauth,
     meet,
@@ -74,7 +73,6 @@ _API = "/api"
 app.include_router(auth.router, prefix=_API)
 app.include_router(doctor.router, prefix=_API)
 app.include_router(patient.router, prefix=_API)
-app.include_router(consultation.router, prefix=_API)
 app.include_router(chatbot.router, prefix=_API)
 app.include_router(patient_chatbot.router, prefix=_API)
 app.include_router(google_oauth.router, prefix=_API)

@@ -44,7 +44,10 @@ from services.claude_service import (
     generate_soap_note,
 )
 from services.google_calendar import (
+    CalendarEventResult,
     _platform_credentials,
+    calendar_invite_available,
+    create_meeting_event,
     platform_is_configured,
 )
 from services.ner import extract_medical_entities
@@ -78,10 +81,42 @@ _tasks: dict[str, _MeetTask] = {}
 # ── Schemas ──────────────────────────────────────────────────────────────
 
 
+class ScheduleMeetingRequest(BaseModel):
+    doctor_name: str = Field(default="Doctor", max_length=200)
+    patient_name: str = Field(default="Patient", max_length=200)
+    patient_email: Optional[str] = None
+    doctor_email: Optional[str] = None
+    scheduled_at: str  # ISO 8601 datetime string
+    duration_minutes: int = 30
+    reason: str = ""
+
+
+class ScheduledMeetingDTO(BaseModel):
+    session_id: str
+    doctor_name: str
+    patient_name: str
+    patient_email: Optional[str] = None
+    doctor_email: Optional[str] = None
+    scheduled_at: str
+    duration_minutes: int
+    reason: str
+    status: str
+    created_at: str
+    organizer_role: Optional[str] = None
+    meet_link: Optional[str] = None
+    google_event_id: Optional[str] = None
+    google_event_link: Optional[str] = None
+    google_invite_status: str = "skipped"  # "sent" | "skipped" | "failed"
+    google_invite_error: Optional[str] = None
+
+
+class ScheduledListResponse(BaseModel):
+    meetings: list[ScheduledMeetingDTO]
+
+
 class LinkConferenceRequest(BaseModel):
     session_id: str = Field(..., max_length=64)
     meet_conference_id: str = Field(..., max_length=200)
-    room_id: Optional[str] = Field(default=None, max_length=64)
     patient_name: Optional[str] = Field(default=None, max_length=200)
     doctor_name: Optional[str] = Field(default=None, max_length=200)
 
@@ -122,6 +157,178 @@ class UnprocessedSessionDTO(BaseModel):
     meet_conference_id: Optional[str] = None
     processing_status: Optional[str] = None
     created_at: datetime
+
+
+# ── Endpoint: schedule a Google Meet consultation ────────────────────────
+
+
+def _row_to_meeting_dto(row: ConsultationSession) -> ScheduledMeetingDTO:
+    return ScheduledMeetingDTO(
+        session_id=row.id,
+        doctor_name=row.doctor_name or "Doctor",
+        patient_name=row.patient_name or "Patient",
+        patient_email=row.patient_email,
+        doctor_email=row.doctor_email,
+        scheduled_at=row.scheduled_at.isoformat() if row.scheduled_at else "",
+        duration_minutes=row.duration_minutes or 30,
+        reason=row.reason or "",
+        status=row.status or "scheduled",
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        organizer_role=row.organizer_role,
+        meet_link=row.meet_link,
+        google_event_id=row.google_event_id,
+        google_event_link=row.google_event_link,
+        google_invite_status=row.google_invite_status or "skipped",
+        google_invite_error=row.google_invite_error,
+    )
+
+
+@router.post("/schedule", response_model=ScheduledMeetingDTO)
+async def schedule_meeting(
+    payload: ScheduleMeetingRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ScheduledMeetingDTO:
+    """Schedule a consultation by creating a Google Calendar event with a
+    Meet link. Persists a ConsultationSession row so the doctor dashboard
+    can later process the Meet transcript into a SOAP note."""
+    organizer_role = user.role
+    if organizer_role == "doctor":
+        doctor_name = (payload.doctor_name or user.full_name).strip()
+        patient_name = (payload.patient_name or "Patient").strip()
+        doctor_email = payload.doctor_email or user.email
+        patient_email = payload.patient_email
+        attendee_email = patient_email
+        attendee_name = patient_name
+    elif organizer_role == "patient":
+        doctor_name = (payload.doctor_name or "Doctor").strip()
+        patient_name = (payload.patient_name or user.full_name).strip()
+        doctor_email = payload.doctor_email
+        patient_email = payload.patient_email or user.email
+        attendee_email = doctor_email
+        attendee_name = doctor_name
+    else:
+        raise HTTPException(status_code=403, detail="Only doctors or patients may schedule.")
+
+    try:
+        scheduled_dt = datetime.fromisoformat(payload.scheduled_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scheduled_at — must be ISO 8601.")
+
+    title = f"MediSense Consultation — {doctor_name} & {patient_name}"
+    description_lines = [
+        "MediSense AI live consultation.",
+        "",
+        f"Doctor: {doctor_name}",
+        f"Patient: {patient_name}",
+    ]
+    if payload.reason.strip():
+        description_lines += ["", f"Reason: {payload.reason.strip()}"]
+    description = "\n".join(description_lines)
+
+    meet_link: Optional[str] = None
+    event_id: Optional[str] = None
+    event_link: Optional[str] = None
+    invite_status = "skipped"
+    invite_error: Optional[str] = None
+
+    if calendar_invite_available(user):
+        if not attendee_email:
+            invite_status = "failed"
+            invite_error = (
+                f"Add the {('patient' if organizer_role == 'doctor' else 'doctor')}"
+                "'s email so we can include them on the calendar invite."
+            )
+        else:
+            try:
+                event: CalendarEventResult = await create_meeting_event(
+                    db=db,
+                    organizer=user,
+                    attendee_email=attendee_email,
+                    attendee_name=attendee_name,
+                    title=title,
+                    description=description,
+                    start_iso=payload.scheduled_at,
+                    duration_minutes=payload.duration_minutes,
+                )
+                meet_link = event.meet_link
+                event_id = event.event_id
+                event_link = event.html_link
+                invite_status = "sent"
+            except Exception as exc:
+                logger.error(
+                    f"Calendar invite failed during scheduling: {exc}", exc_info=True
+                )
+                invite_status = "failed"
+                invite_error = (
+                    "Could not create the Google Calendar event. "
+                    "Check that the platform Google account is configured."
+                )
+
+    session_id = generate_id()
+    row = ConsultationSession(
+        id=session_id,
+        doctor_id=user.id if organizer_role == "doctor" else None,
+        doctor_name=doctor_name,
+        patient_name=patient_name,
+        status="scheduled",
+        scheduled_at=scheduled_dt,
+        duration_minutes=payload.duration_minutes,
+        reason=payload.reason.strip(),
+        patient_email=patient_email,
+        doctor_email=doctor_email,
+        organizer_id=user.id,
+        organizer_role=organizer_role,
+        meet_link=meet_link,
+        google_event_id=event_id,
+        google_event_link=event_link,
+        google_invite_status=invite_status,
+        google_invite_error=invite_error,
+    )
+
+    # If we got a Meet link, derive the conference id so the doctor dashboard
+    # can later process the transcript without an extra link-conference call.
+    if meet_link:
+        try:
+            from urllib.parse import urlparse
+
+            path = urlparse(meet_link).path or ""
+            conf_id = path.strip("/").split("/")[-1] if path else ""
+            if conf_id:
+                row.meet_conference_id = conf_id
+                row.processing_status = "pending"
+        except Exception:
+            pass
+
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    logger.info(
+        f"Consultation scheduled: session={session_id} at {payload.scheduled_at} "
+        f"(organizer={organizer_role} {user.id}, invite={invite_status})"
+    )
+    return _row_to_meeting_dto(row)
+
+
+@router.get("/scheduled", response_model=ScheduledListResponse)
+async def list_scheduled_meetings(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ScheduledListResponse:
+    """List the current user's scheduled consultations, sorted by start time."""
+    rows = (
+        await db.execute(
+            select(ConsultationSession)
+            .where(
+                ConsultationSession.organizer_id == user.id,
+                ConsultationSession.scheduled_at.is_not(None),
+            )
+            .order_by(ConsultationSession.scheduled_at.asc())
+        )
+    ).scalars().all()
+
+    return ScheduledListResponse(meetings=[_row_to_meeting_dto(r) for r in rows])
 
 
 # ── Endpoint: list unprocessed sessions ──────────────────────────────────
