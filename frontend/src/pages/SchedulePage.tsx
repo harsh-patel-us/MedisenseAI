@@ -81,14 +81,14 @@ function buildMailto(meeting: ScheduledMeeting): string {
     : '';
   const body = encodeURIComponent(
     `Hello ${meeting.patient_name},\n\n` +
-      `Your video consultation is scheduled for ${formatDateTime(meeting.scheduled_at)} ` +
-      `(${meeting.duration_minutes} minutes) with ${meeting.doctor_name}.\n\n` +
-      joinLine +
-      (meeting.reason ? `Reason for visit: ${meeting.reason}\n\n` : '') +
-      `During the call, the conversation is live-transcribed by Google Meet. After the ` +
-      `call ends, your doctor will receive an AI-generated SOAP note and you'll be sent ` +
-      `a patient-friendly summary.\n\n` +
-      `— MediSense AI`,
+    `Your video consultation is scheduled for ${formatDateTime(meeting.scheduled_at)} ` +
+    `(${meeting.duration_minutes} minutes) with ${meeting.doctor_name}.\n\n` +
+    joinLine +
+    (meeting.reason ? `Reason for visit: ${meeting.reason}\n\n` : '') +
+    `During the call, the conversation is live-transcribed by Google Meet. After the ` +
+    `call ends, your doctor will receive an AI-generated SOAP note and you'll be sent ` +
+    `a patient-friendly summary.\n\n` +
+    `— MediSense AI`,
   );
   return `mailto:${to}?subject=${subject}&body=${body}`;
 }
@@ -317,7 +317,7 @@ export default function SchedulePage() {
 
                 <div>
                   <label style={labelStyle}>
-                    {isDoctor ? 'Patient Email (optional)' : 'Doctor Email (optional)'}
+                    {isDoctor ? 'Patient Email' : 'Doctor Email'}
                   </label>
                   <input
                     type="email"
