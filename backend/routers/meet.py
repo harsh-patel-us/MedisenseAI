@@ -18,7 +18,7 @@ import hmac
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import (
@@ -214,6 +214,11 @@ async def schedule_meeting(
         scheduled_dt = datetime.fromisoformat(payload.scheduled_at.replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid scheduled_at — must be ISO 8601.")
+
+    # Normalize to UTC-naive so it fits the TIMESTAMP WITHOUT TIME ZONE column
+    # (Postgres asyncpg refuses to bind tz-aware datetimes against naive columns).
+    if scheduled_dt.tzinfo is not None:
+        scheduled_dt = scheduled_dt.astimezone(timezone.utc).replace(tzinfo=None)
 
     title = f"MediSense Consultation — {doctor_name} & {patient_name}"
     description_lines = [

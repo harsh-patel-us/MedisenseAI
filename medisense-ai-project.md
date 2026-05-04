@@ -31,15 +31,16 @@
 
 **Tagline:** From consultation to care — AI-powered health intelligence for doctors and patients.
 
-**Type:** Full-stack web application (Doctor side + Patient side + Video Consultations + Patient AI Chatbot)
+**Type:** Full-stack web application (Doctor side + Patient side + Patient AI Chatbot + Google Meet consultations)
 
-**Core AI:** OpenRouter API (default model: `openai/gpt-4o-mini`) for all intelligence tasks
+**Core AI:** OpenRouter API (default model: `openai/gpt-4o-mini`) for all intelligence tasks. Sarvam AI for Indic STT/TTS in the patient chatbot.
 
 **Key Differentiators:**
 - Three distinct AI workflows in one platform
-- Persistent patient chatbot ("Medisense AI") with cross-session memory
-- Browser-native WebRTC video consultations — no app install
+- Persistent patient chatbot ("Medisense AI") with cross-session memory and voice I/O
+- Google Meet consultations with automatic transcript → SOAP processing (no in-app video room — uses the user's existing Meet client and Calendar)
 - JWT auth with role-based access (doctor / patient)
+- Runs on SQLite (dev) and PostgreSQL (prod) without code changes
 
 ---
 
@@ -86,11 +87,16 @@ MediSense AI is a **multi-sided AI health platform**:
 - Auto-generates session titles and summaries for easy reference
 - Full chat history with grouped sessions (Today, Yesterday, etc.)
 
-### Video Consultations
-- WebRTC browser-native video calls (doctor ↔ patient)
-- Patient joins with a 6-character room code — no downloads
-- Real-time transcription during the call
-- Auto SOAP note + patient-friendly explanation post-call
+### Video Consultations (Google Meet)
+- Doctor or patient schedules a meeting from `/consultation/schedule`
+- Backend creates a Google Calendar event with an auto-generated Meet link, emails both parties, and persists a `ConsultationSession` row in `status="scheduled"`
+- The Meet conference id is parsed out of the Meet URL at scheduling time, so the session is immediately ready for transcript processing
+- Both parties join the standard Google Meet client (browser or native)
+- After the call, the doctor opens **Doctor Dashboard → Process Google Meet Consultation**, picks the unprocessed session, and the backend runs the transcript through the diarization → NER → SOAP pipeline as a `BackgroundTask`
+- A signed `POST /meet/webhook` (HMAC-SHA256) is also available for fully automatic post-call processing
+- A patient-friendly explanation of the SOAP note is generated for the patient
+
+> The previous in-app WebRTC room (`ConsultationRoom.tsx`, `JoinConsultation.tsx`, `routers/consultation.py`, the `consultation/` component directory and `consultationApi.ts`) was removed in May 2026. Google Meet is now the only video-call surface.
 
 ---
 
@@ -102,24 +108,25 @@ MediSense AI is a **multi-sided AI health platform**:
 │                                                                   │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
 │  │   Doctor      │  │   Patient    │  │   Patient Chatbot    │   │
-│  │   Dashboard   │  │   Dashboard  │  │   (Medisense AI)    │   │
+│  │   Dashboard   │  │   Dashboard  │  │   (Medisense AI)     │   │
 │  │  - Record     │  │  - Upload    │  │  - Persistent chat   │   │
 │  │  - Transcript │  │  - 4-tab UI  │  │  - File attachments  │   │
-│  │  - SOAP edit  │  │  - PDF guide │  │  - Session history   │   │
+│  │  - SOAP edit  │  │  - PDF guide │  │  - Voice in / out    │   │
+│  │  - Process    │  │              │  │  - Session history   │   │
+│  │    Meet       │  │              │  │                      │   │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘   │
 │         │                 │                      │               │
 │  ┌──────┴─────────────────┴──────────────────────┴───────────┐   │
-│  │              Video Consultation Room (WebRTC)              │   │
+│  │      Schedule Page  ──▶  Google Meet (external client)     │   │
 │  └────────────────────────────┬───────────────────────────────┘   │
 └───────────────────────────────┼───────────────────────────────────┘
-                                │ HTTP / WebSocket
+                                │ HTTP + 1 WebSocket (doctor STT)
                                 ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│                      BACKEND (FastAPI)                             │
+│                      BACKEND (FastAPI, /api prefix)                │
 │                                                                   │
-│  Auth (JWT) ─── Doctor ─── Patient ─── Consultation               │
-│  Chatbot Widget ─── Patient Chatbot (Medisense AI)               │
-│  Meet ─── Google OAuth ─── Google Calendar                        │
+│  Auth (JWT) ─── Doctor ─── Patient ─── Chatbot widget             │
+│  Patient Chatbot (Medisense AI) ─── Meet ─── Google OAuth         │
 │                                                                   │
 │  Services: claude_service, transcription, diarization, ner,       │
 │           report_parser, pdf_export, auth_service,                │
@@ -127,14 +134,16 @@ MediSense AI is a **multi-sided AI health platform**:
 │           sarvam_stt_service, sarvam_tts_service                  │
 │                                                                   │
 │  Prompts: prompts/*.txt (9 prompt files loaded at import)         │
-│  Database: SQLite + SQLAlchemy async (7 tables)                   │
+│  Database: SQLAlchemy async — SQLite (dev) or Postgres (prod),   │
+│            7 tables, idempotent ALTER-TABLE migrations.           │
 └───────────────────────────────┬───────────────────────────────────┘
                                 │
               ┌─────────────────┼─────────────────┐
               │                 │                 │
     ┌─────────▼──────┐  ┌──────▼───────┐  ┌──────▼──────┐
     │  OpenRouter API │  │  Sarvam AI   │  │  Google     │
-    │  (gpt-4o-mini)  │  │  (STT/TTS)   │  │  Calendar   │
+    │  (gpt-4o-mini)  │  │  (STT/TTS)   │  │  Calendar / │
+    │                 │  │              │  │  Meet       │
     └────────────────┘  └──────────────┘  └─────────────┘
 ```
 
@@ -168,8 +177,8 @@ MediSense AI is a **multi-sided AI health platform**:
 | TypeScript 5+ | Type safety |
 | Vite | Build tool + dev server |
 | Vanilla CSS | Glassmorphism styling (no Tailwind) |
-| WebSocket API | Real-time streaming |
-| WebRTC API | Video consultations |
+| WebSocket API | Real-time STT streaming on the doctor side |
+| Google Meet (external) | Video consultations — opened from `SchedulePage.tsx` |
 
 ---
 
@@ -194,14 +203,13 @@ MediSenseAI/
 │   │   ├── patient_chatbot_summary.txt # Session summary prompt
 │   │   ├── chatbot_system.txt         # Website chatbot prompt
 │   │   └── safety_system.txt          # Safety guardrails
-│   ├── routers/
+│   ├── routers/                       # 7 routers, all mounted under /api
 │   │   ├── auth.py                    # POST /auth/register, /auth/login, GET /auth/me
-│   │   ├── doctor.py                  # WS /doctor/stream-audio, POST /doctor/generate-note, /doctor/export-pdf
-│   │   ├── patient.py                 # POST /patient/upload, /patient/analyze, /patient/export-pdf
-│   │   ├── consultation.py            # Consultation rooms, WebRTC, post-call
+│   │   ├── doctor.py                  # WS /doctor/stream-audio, POST /doctor/generate-note, /export-pdf, GET /sessions
+│   │   ├── patient.py                 # POST /patient/upload, /analyze, /export-pdf, GET /history*
 │   │   ├── chatbot.py                 # POST /chatbot/message
-│   │   ├── patient_chatbot.py         # Medisense AI sessions + messages + voice
-│   │   ├── meet.py                    # Google Meet transcript processing
+│   │   ├── patient_chatbot.py         # Medisense AI sessions + messages + voice + TTS + attachments
+│   │   ├── meet.py                    # Schedule + list + Meet transcript processing + webhook
 │   │   └── google_oauth.py            # Google Calendar OAuth flow
 │   ├── services/
 │   │   ├── claude_service.py          # All LLM calls via OpenRouter + vision OCR
@@ -232,24 +240,23 @@ MediSenseAI/
 │   ├── App.tsx                        # Landing page + Navbar + Routes
 │   ├── index.css                      # Design system (glassmorphism, CSS vars)
 │   ├── main.tsx
-│   ├── pages/
+│   ├── pages/                         # 14 pages — no in-app video room
 │   │   ├── Login.tsx, Register.tsx
-│   │   ├── DoctorDashboard.tsx
+│   │   ├── DoctorDashboard.tsx        # Audio → SOAP + Process Google Meet section
 │   │   ├── PatientDashboard.tsx
 │   │   ├── PatientChat.tsx            # Medisense AI chatbot UI
-│   │   ├── ConsultationRoom.tsx
-│   │   ├── JoinConsultation.tsx
-│   │   ├── SchedulePage.tsx
+│   │   ├── SchedulePage.tsx           # Doctor + patient scheduling
 │   │   └── [8 marketing pages]
 │   ├── components/
 │   │   ├── ChatbotWidget.tsx, ProtectedRoute.tsx, ScrollToTop.tsx
 │   │   ├── doctor/     (AudioRecorder, LiveTranscript, SoapNoteEditor)
-│   │   ├── patient/    (ReportUploader, ReportSummary, SpecialistGuide, DietExercisePlan, PrecautionsList)
-│   │   └── consultation/ (VideoGrid, CallControls, ConsultationTranscript, PostCallSummary)
-│   ├── api/            (authApi, doctorApi, patientApi, consultationApi, chatbotApi, patientChatbotApi)
+│   │   └── patient/    (ReportUploader, ReportSummary, SpecialistGuide, DietExercisePlan, PrecautionsList)
+│   ├── api/            (authApi, doctorApi, patientApi, chatbotApi,
+│   │                    patientChatbotApi, meetApi, googleIntegrationApi)
 │   ├── contexts/       (AuthContext)
 │   ├── hooks/          (useAudioRecorder, useWebSocket)
-│   └── types/          (auth, doctor, patient, consultation, chatbot, patientChatbot)
+│   └── types/          (auth, doctor, patient, consultation [Google types only],
+│                        chatbot, patientChatbot)
 │
 ├── demo/
 │   ├── sample_reports/
@@ -319,22 +326,39 @@ Every N messages: auto-generate session summary for future memory
 On session end: final summary stored, sidebar refreshes
 ```
 
-### 7.4 Video Consultation
+### 7.4 Google Meet Consultation (schedule → call → SOAP)
 
 ```
-Doctor creates room → 6-char code generated
+Doctor or patient opens /consultation/schedule and submits the form
         ↓
-Patient joins with code → WebRTC peer connection
+POST /api/meet/schedule
         ↓
-Live video + audio streaming (browser-native)
+google_calendar.create_meeting_event(...)
+   → Google Calendar event with auto-generated Meet link
+   → Email invite sent to the other party
         ↓
-Real-time transcription during call
+ConsultationSession row persisted (status="scheduled")
+   → meet_link, google_event_id, google_event_link, google_invite_status
+   → meet_conference_id auto-extracted from the Meet URL
+   → processing_status = "pending"
         ↓
-Call ends → Auto SOAP note generation (Prompt 1)
+Both parties join Google Meet at the scheduled time (external client)
         ↓
-Patient explanation generated (Prompt 5)
+After the call ends:
         ↓
-Both parties see post-call summary
+Doctor opens Doctor Dashboard → "Process Google Meet Consultation"
+        ↓
+POST /api/meet/process-transcript {session_id, meet_conference_id?}
+        ↓
+BackgroundTask: fetch transcript → diarization → NER → SOAP (Prompt 1)
+                                            → patient explanation (Prompt 5)
+        ↓
+Frontend polls GET /api/meet/process-status/{task_id}
+        ↓
+SoapNoteEditor renders the result; patient explanation stored on the session
+        ↓
+(Optional) POST /api/meet/webhook (HMAC-SHA256) can trigger the same
+            pipeline automatically when Google reports "meeting ended".
 ```
 
 ---
@@ -348,46 +372,78 @@ POST  /auth/login       { email, password }                   →  { user, token
 GET   /auth/me          (Bearer token)                        →  { user }
 ```
 
+All routers are mounted under the `/api` prefix.
+
+### Auth
+```
+POST  /api/auth/register   { email, password, full_name, role }  →  { user, token }
+POST  /api/auth/login      { email, password }                   →  { user, token }
+GET   /api/auth/me         (Bearer token)                        →  { user }
+```
+
 ### Doctor
 ```
-WS    /doctor/stream-audio       Streams audio chunks, returns transcript segments
-POST  /doctor/generate-note      { transcript, session_id }  →  { soap_note, entities }
-POST  /doctor/export-pdf         { soap_note }               →  PDF file
-GET   /doctor/sessions           List past consultation sessions
+WS    /api/doctor/stream-audio       Streams audio chunks, returns transcript segments
+POST  /api/doctor/generate-note      { transcript, session_id }  →  { soap_note, entities }
+POST  /api/doctor/export-pdf         { soap_note }               →  PDF file
+GET   /api/doctor/sessions           List past consultation sessions
 ```
 
 ### Patient
 ```
-POST  /patient/upload            multipart { file }           →  { file_id, raw_text }
-POST  /patient/analyze           { file_id, raw_text }        →  { findings, summary, diet, ... }
-POST  /patient/export-pdf        { analysis_result }          →  PDF file
+POST  /api/patient/upload                 multipart { file }     →  { file_id, raw_text }
+POST  /api/patient/analyze                { file_id, raw_text }  →  { findings, summary, diet, ... }
+POST  /api/patient/export-pdf             { analysis_result }    →  PDF file
+GET   /api/patient/history                                       →  list of past analyses
+GET   /api/patient/history/{record_id}                           →  full record
+GET   /api/patient/history/{record_id}/file                      →  original uploaded file
+GET   /api/patient/history/{record_id}/pdf                       →  generated health-guide PDF
 ```
 
-### Consultation
+### Google Meet (scheduling + transcript processing)
 ```
-POST  /consultation/create       { patient_name? }            →  { room_id, join_code }
-POST  /consultation/join         { join_code }                →  { room_id }
-POST  /consultation/end          { room_id }                  →  { soap_note, patient_explanation }
-WS    /consultation/ws/{room_id} WebRTC signaling + live transcript
+POST  /api/meet/schedule                {doctor_name, patient_name, scheduled_at,
+                                         duration_minutes, reason,
+                                         patient_email?, doctor_email?}
+                                                            →  ScheduledMeetingDTO
+GET   /api/meet/scheduled                                   →  { meetings: [...] }
+GET   /api/meet/sessions/unprocessed                        →  list of sessions ready to process
+POST  /api/meet/link-conference         {session_id, meet_conference_id, ...}
+                                                            →  { session_id, status }
+POST  /api/meet/process-transcript      {session_id, meet_conference_id?}
+                                                            →  { task_id, status }
+GET   /api/meet/process-status/{task_id}                    →  { status, soap_note, patient_explanation, ... }
+POST  /api/meet/webhook                 (HMAC-SHA256 signed)→  triggers processing on "meeting ended"
+```
+
+### Google Calendar OAuth
+```
+GET   /api/integrations/google/status                       →  { connected, email }
+GET   /api/integrations/google/auth-url                     →  { auth_url, state }
+GET   /api/integrations/google/callback                     OAuth redirect target
+POST  /api/integrations/google/disconnect                   →  { ok: true }
 ```
 
 ### Patient Chatbot (Medisense AI)
 ```
-GET   /patient-chat/{patient_id}/history         →  { sessions[] }
-GET   /patient-chat/session/{session_id}         →  { messages[] }
-POST  /patient-chat/{patient_id}/send            { session_id?, text?, attachments[] }  →  { reply, session_id }
-POST  /patient-chat/{patient_id}/end/{session_id}  →  { summary }
+POST  /api/patient-chat/message                  { session_id?, message, attachments[] }  →  { reply, session_id, ... }
+GET   /api/patient-chat/history/{patient_id}                                              →  { sessions[] }
+GET   /api/patient-chat/session/{session_id}                                              →  { messages[] }
+POST  /api/patient-chat/session/end              { session_id }                           →  { summary }
+POST  /api/patient-chat/voice-message            { audio_base64, mime_type }              →  { transcript }
+POST  /api/patient-chat/tts                      { text }                                  →  { audio_base64, mime_type }
+GET   /api/patient-chat/attachment/{attachment_id}                                        →  raw bytes
 ```
 
 ### Website Chatbot
 ```
-POST  /chatbot/message    { message, session_id? }  →  { reply, session_id }
+POST  /api/chatbot/message    { message, session_id? }  →  { reply, session_id }
 ```
 
 ### System
 ```
-GET   /health    →  { status, version, model, environment }
-GET   /          →  { message, docs, health }
+GET   /health   (also /api/health)   →  { status, version, model, environment }
+GET   /                              →  { message, docs, health }
 ```
 
 ---
@@ -412,20 +468,24 @@ All prompts live in the `prompts/` folder as plain-text `.txt` files. They are l
 
 ## 10. Database Schema
 
-7 tables managed by SQLAlchemy async ORM (SQLite):
+7 tables managed by SQLAlchemy async ORM. Works against SQLite (dev) or PostgreSQL via `asyncpg` (prod). Schema additions are applied as idempotent `ALTER TABLE ADD COLUMN` migrations in `init_db()`.
 
 ```sql
--- Auth
+-- Auth (extended with Google OAuth fields used by routers/google_oauth.py)
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL  -- "doctor" | "patient"
+    role TEXT NOT NULL,                 -- "doctor" | "patient"
+    google_refresh_token TEXT,          -- per-user Calendar OAuth (optional)
+    google_calendar_email TEXT
 );
 
--- Doctor consultations
+-- Doctor consultations + scheduled Google Meet consultations.
+-- A single row carries both: status starts "scheduled" if created via /meet/schedule,
+-- or "in_progress" if started via the doctor audio-recording flow.
 CREATE TABLE consultation_sessions (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP,
@@ -434,13 +494,38 @@ CREATE TABLE consultation_sessions (
     patient_identifier TEXT,
     patient_name TEXT,
     raw_transcript TEXT,
-    labeled_transcript TEXT,   -- JSON
-    extracted_entities TEXT,    -- JSON
-    soap_note TEXT,            -- JSON
+    labeled_transcript TEXT,            -- JSON
+    extracted_entities TEXT,            -- JSON
+    soap_note TEXT,                     -- JSON
     soap_pdf_path TEXT,
     soap_pdf_size INTEGER,
-    status TEXT DEFAULT 'in_progress'
+    status TEXT DEFAULT 'in_progress',  -- "scheduled" | "in_progress" | "completed"
+
+    -- Google Meet linkage
+    meet_conference_id TEXT,            -- e.g. "tie-mhnt-nii", parsed from Meet URL
+    processing_status TEXT,             -- "pending" | "running" | "completed" | "failed"
+    processing_task_id TEXT,
+
+    -- Scheduling fields (added when created via /meet/schedule)
+    scheduled_at TIMESTAMP,             -- TIMESTAMP WITHOUT TIME ZONE; stored as UTC-naive
+    duration_minutes INTEGER,
+    reason TEXT,
+    patient_email TEXT,
+    doctor_email TEXT,
+    organizer_id TEXT REFERENCES users(id),
+    organizer_role TEXT,                -- "doctor" | "patient"
+
+    -- Google Calendar / Meet artifacts
+    meet_link TEXT,                     -- e.g. "https://meet.google.com/tie-mhnt-nii"
+    google_event_id TEXT,
+    google_event_link TEXT,
+    google_invite_status TEXT,          -- "sent" | "skipped" | "failed"
+    google_invite_error TEXT
 );
+
+-- ⚠️ Datetime gotcha: scheduled_at is naive. The frontend sends an ISO string with a
+-- Z/offset, so routers/meet.py converts the parsed datetime to UTC and strips tzinfo
+-- before insert. asyncpg refuses to bind a tz-aware datetime against a naive column.
 
 -- Website chatbot widget
 CREATE TABLE chatbot_sessions (
@@ -608,10 +693,38 @@ interface ChatFileReference {
   filename: string; mime_type: string; size_bytes: number; kind: 'image' | 'pdf';
 }
 
-// types/consultation.types.ts
-interface ConsultationRoom {
-  id: string; join_code: string; doctor_id: string;
-  patient_name?: string; status: string;
+// types/consultation.types.ts — trimmed; only Google integration types remain
+type GoogleInviteStatus = 'sent' | 'skipped' | 'failed';
+interface GoogleConnectionStatus { connected: boolean; email: string | null; }
+interface GoogleAuthUrlResponse { auth_url: string; state: string; }
+
+// api/meetApi.ts — scheduling lives here now
+interface ScheduleMeetingRequest {
+  doctor_name: string;
+  patient_name: string;
+  patient_email?: string;
+  doctor_email?: string;
+  scheduled_at: string;        // ISO 8601 with offset/Z
+  duration_minutes: number;
+  reason: string;
+}
+interface ScheduledMeeting {
+  session_id: string;
+  doctor_name: string;
+  patient_name: string;
+  patient_email?: string | null;
+  doctor_email?: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  reason: string;
+  status: string;              // "scheduled" | "completed" | ...
+  created_at: string;
+  organizer_role?: 'doctor' | 'patient' | null;
+  meet_link?: string | null;
+  google_event_id?: string | null;
+  google_event_link?: string | null;
+  google_invite_status?: GoogleInviteStatus;
+  google_invite_error?: string | null;
 }
 ```
 
@@ -635,8 +748,10 @@ Register as patient → Dashboard → Upload diabetes_blood_report.pdf → View 
 ### Scenario 3 — Patient (AI Chatbot)
 Login as patient → Chat with Medisense AI → Ask about symptoms → Upload lab image → Start new chat → AI remembers history
 
-### Scenario 4 — Video Consultation
-Doctor creates room → Shares code → Patient joins → Video call → Call ends → Auto SOAP + patient explanation
+### Scenario 4 — Google Meet Consultation
+Doctor or patient logs in → `/consultation/schedule` → fills the form → backend creates a Google Calendar event with a Meet link → both parties receive an invite → join Google Meet at the scheduled time → after the call, the doctor opens **Doctor Dashboard → "Process Google Meet Consultation"** and clicks **Process** → the transcript is run through diarization → NER → SOAP, the SOAP note appears in the editor, and a patient-friendly explanation is stored on the session.
+
+> Google Meet transcripts require a Google Workspace plan (Business Standard or higher). Free `@gmail.com` accounts can host the call but won't produce a transcript.
 
 ---
 

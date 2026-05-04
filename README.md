@@ -96,7 +96,12 @@ MediSenseAI/
 ├── backend/                  # FastAPI Python backend
 │   ├── main.py               # App entry point (lifespan, CORS, routers)
 │   ├── config.py             # Settings loaded from .env (no prompts)
-│   ├── database.py           # SQLite async ORM (7 tables)
+│   ├── database.py           # Async ORM (7 tables, SQLite or Postgres)
+│   │                         # ConsultationSession now also persists scheduling
+│   │                         # fields: scheduled_at, duration_minutes, reason,
+│   │                         # patient_email, doctor_email, organizer_id,
+│   │                         # organizer_role, meet_link, google_event_id,
+│   │                         # google_event_link, google_invite_status, error
 │   ├── requirements.txt
 │   │
 │   ├── prompts/              # AI prompt templates (plain-text files)
@@ -113,12 +118,11 @@ MediSenseAI/
 │   │
 │   ├── routers/
 │   │   ├── auth.py           # JWT register/login/me
-│   │   ├── doctor.py         # WebSocket audio + SOAP endpoints
-│   │   ├── patient.py        # Report upload, analysis, PDF export
-│   │   ├── consultation.py   # Video call rooms, WebRTC, post-call summaries
+│   │   ├── doctor.py         # WebSocket audio + SOAP endpoints + sessions list
+│   │   ├── patient.py        # Report upload, analysis, PDF export, history
 │   │   ├── chatbot.py        # Website support chatbot widget
 │   │   ├── patient_chatbot.py # Medisense AI persistent patient chatbot
-│   │   ├── meet.py           # Google Meet transcript processing
+│   │   ├── meet.py           # Google Meet scheduling + transcript processing
 │   │   └── google_oauth.py   # Google Calendar OAuth flow
 │   │
 │   ├── services/
@@ -158,12 +162,11 @@ MediSenseAI/
 │       │
 │       ├── pages/
 │       │   ├── Login.tsx / Register.tsx        # Auth
-│       │   ├── DoctorDashboard.tsx             # Audio → SOAP workflow
+│       │   ├── DoctorDashboard.tsx             # Audio → SOAP workflow + Meet processing
 │       │   ├── PatientDashboard.tsx            # Report → health guide
 │       │   ├── PatientChat.tsx                 # Medisense AI chatbot
-│       │   ├── ConsultationRoom.tsx            # WebRTC video call
-│       │   ├── JoinConsultation.tsx            # Join with room code
-│       │   ├── SchedulePage.tsx                # Doctor scheduling + Google Calendar
+│       │   ├── SchedulePage.tsx                # Doctor + patient scheduling
+│       │   │                                   # (Google Calendar + Meet link)
 │       │   └── AboutPage, ContactPage, FeaturesPage, UseCasesPage,
 │       │       PricingPage, SecurityPage, IntegrationsPage, ResourcesPage
 │       │
@@ -172,18 +175,16 @@ MediSenseAI/
 │       │   ├── ProtectedRoute.tsx              # Role-based route guard
 │       │   ├── ScrollToTop.tsx
 │       │   ├── doctor/       # AudioRecorder, LiveTranscript, SoapNoteEditor
-│       │   ├── patient/      # ReportUploader, ReportSummary, SpecialistGuide,
-│       │   │                 # DietExercisePlan, PrecautionsList
-│       │   └── consultation/ # VideoGrid, CallControls,
-│       │                     # ConsultationTranscript, PostCallSummary
+│       │   └── patient/      # ReportUploader, ReportSummary, SpecialistGuide,
+│       │                     # DietExercisePlan, PrecautionsList
 │       │
 │       ├── api/              # authApi, doctorApi, patientApi,
-│       │                     # consultationApi, chatbotApi, patientChatbotApi,
+│       │                     # chatbotApi, patientChatbotApi,
 │       │                     # meetApi, googleIntegrationApi
 │       ├── contexts/         # AuthContext (user, token, login/logout)
 │       ├── hooks/            # useAudioRecorder, useWebSocket
-│       └── types/            # auth, doctor, patient, consultation,
-│                             # chatbot, patientChatbot
+│       └── types/            # auth, doctor, patient, consultation (Google
+│                             # types only), chatbot, patientChatbot
 │
 └── demo/
     ├── sample_reports/       # PDF lab reports for testing
@@ -238,16 +239,18 @@ MediSenseAI/
 | Animated "thinking" indicator (shimmer + bouncing dots) | ✅ |
 | Medical safety guardrails | ✅ |
 
-### Video Consultations
+### Video Consultations (Google Meet)
 | Feature | Status |
 |---------|--------|
-| WebRTC browser-native video calls | ✅ |
-| 6-character room code for patient join | ✅ |
-| Real-time transcript during call | ✅ |
-| Auto SOAP note generation post-call | ✅ |
-| Patient-friendly post-call explanation | ✅ |
-| Doctor scheduling interface | ✅ |
-| Google Calendar + Meet link integration | ✅ |
+| Schedule a consultation (doctor **or** patient) | ✅ |
+| Google Calendar event with auto-generated Meet link | ✅ |
+| Email invite to the other party (when calendar invite is configured) | ✅ |
+| Upcoming-meetings list with one-click "Join Google Meet" / "Open in Calendar" | ✅ |
+| Auto-link the Meet conference id to the consultation session | ✅ |
+| Doctor-side Meet transcript processing (diarization → NER → SOAP) | ✅ |
+| Patient-friendly post-call explanation generated from the transcript | ✅ |
+| Webhook (`POST /meet/webhook`, HMAC-SHA256) for "meeting ended" auto-processing | ✅ |
+| ~~In-app WebRTC video room with 6-character join code~~ | ❌ Removed — Google Meet only |
 
 ### Platform
 | Feature | Status |
@@ -358,17 +361,15 @@ SARVAM_TTS_LANGUAGE=en-IN
 5. Toggle TTS in the header for voice replies
 6. Start a new chat — the AI remembers your history from previous sessions
 
-### Scenario 4 — Video Consultation
-1. Login as a **doctor** → go to **Schedule** → create a consultation
-2. Share the 6-character room code with the patient
-3. Patient logs in → **Join Call** → enters the code
-4. After the call, the doctor gets an auto-generated SOAP note and the patient gets a plain-language explanation
+### Scenario 4 — Schedule + Run a Google Meet Consultation
+1. Login as a **doctor** or **patient** → go to **Schedule**
+2. Fill in the form (other party's name + email, date/time, duration, reason) → submit
+3. The backend creates a Google Calendar event with a Meet link; both parties get the invite
+4. At meeting time, click **Join Google Meet** from the Upcoming card (or open the link from the calendar invite)
+5. After the call, login as the **doctor** → **Doctor Dashboard** → "Process Google Meet Consultation" section
+6. Click **Process** on the unprocessed session → the Meet transcript is run through diarization → NER → SOAP, the SOAP note is shown in the editor, and the patient gets a plain-language post-call explanation
 
-### Scenario 5 — Google Meet Consultation
-1. Login as a **doctor** → go to **Schedule** → create a consultation with Google Calendar
-2. A Google Calendar event with Meet link is auto-created
-3. After the Meet call, go to **Doctor Dashboard** → find the unprocessed session
-4. Click **Process** → the Meet transcript is processed through diarization → NER → SOAP pipeline
+> Google Meet transcripts require a Google Workspace plan (Business Standard or higher). Free `@gmail.com` accounts can host the call but won't produce a transcript for processing.
 
 ---
 
