@@ -44,11 +44,25 @@ export default function Login() {
   };
 
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 120px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '40px 20px',
-    }}>
+    <>
+      {submitting && (
+        <div className="full-page-loader">
+          <div className="loader-content">
+            <div className="loader-rings">
+              <div className="loader-ring" />
+              <div className="loader-ring" />
+              <div className="loader-ring" />
+              <div className="loader-icon">💊</div>
+            </div>
+            <div className="loader-text">Verifying Credentials…</div>
+          </div>
+        </div>
+      )}
+      <div style={{
+        minHeight: 'calc(100vh - 120px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '40px 20px',
+      }}>
       <div className="glass-card" style={{ width: '100%', maxWidth: 460, padding: '36px 32px' }}>
         <h1 style={{
           fontSize: '1.6rem', fontWeight: 800, marginBottom: 6,
@@ -98,21 +112,7 @@ export default function Login() {
             disabled={submitting}
             style={{ padding: '12px', justifyContent: 'center', marginTop: 6 }}
           >
-            {submitting ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{
-                  width: '18px',
-                  height: '18px',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  borderTopColor: '#fff',
-                  borderRadius: '50%',
-                  animation: 'spin 0.8s linear infinite'
-                }} />
-                Signing in…
-              </span>
-            ) : (
-              `Sign in as ${role === 'doctor' ? 'Doctor' : 'Patient'}`
-            )}
+            {submitting ? 'Signing in…' : `Sign in as ${role === 'doctor' ? 'Doctor' : 'Patient'}`}
           </button>
         </form>
 
@@ -127,6 +127,7 @@ export default function Login() {
         </p>
       </div>
     </div>
+    </>
   );
 }
 
