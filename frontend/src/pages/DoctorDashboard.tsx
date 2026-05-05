@@ -161,13 +161,13 @@ export default function DoctorDashboard() {
             Upload a consultation audio file or schedule a Google Meet — both flow into AI-generated SOAP notes
           </p>
         </div>
-        <button
+        {/* <button
           className="btn-primary"
           onClick={() => navigate('/consultation/schedule')}
           style={{ fontSize: '0.88rem', padding: '10px 20px', whiteSpace: 'nowrap' }}
         >
           📅 Schedule Google Meet
-        </button>
+        </button> */}
       </div>
 
 

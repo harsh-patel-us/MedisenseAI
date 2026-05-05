@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+
 import ReportUploader from '../components/patient/ReportUploader';
 import ReportSummary from '../components/patient/ReportSummary';
 import SpecialistGuide from '../components/patient/SpecialistGuide';
@@ -30,71 +30,7 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'precautions', label: 'Precautions', icon: '⚠️' },
 ];
 
-const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
-  { to: '/patient', label: 'Upload Report', icon: '🧾' },
-  { to: '/patient/chat', label: 'Chat with MediSense', icon: '💬' },
-  { to: '/consultation/schedule', label: 'Schedule a Call', icon: '📅' },
-];
 
-function PatientSidebar() {
-  const location = useLocation();
-  return (
-    <aside
-      style={{
-        width: 240,
-        flexShrink: 0,
-        borderRight: '1px solid var(--border-subtle)',
-        background: 'rgba(6,13,27,0.55)',
-        padding: '24px 14px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        minHeight: 'calc(100vh - 64px)',
-      }}
-    >
-      <div
-        style={{
-          fontSize: '0.7rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.6px',
-          color: 'var(--text-muted)',
-          padding: '4px 12px 8px',
-          fontWeight: 700,
-        }}
-      >
-        Patient Workspace
-      </div>
-      {SIDEBAR_LINKS.map((link) => {
-        const active = location.pathname === link.to;
-        return (
-          <Link
-            key={link.to}
-            to={link.to}
-            style={{
-              textDecoration: 'none',
-              padding: '10px 14px',
-              borderRadius: 10,
-              fontSize: '0.88rem',
-              fontWeight: 600,
-              color: active ? 'var(--brand-teal)' : 'var(--text-secondary)',
-              background: active ? 'rgba(5,174,187,0.12)' : 'transparent',
-              border: active
-                ? '1px solid rgba(5,174,187,0.3)'
-                : '1px solid transparent',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              transition: 'background 0.15s, color 0.15s',
-            }}
-          >
-            <span style={{ fontSize: '1rem' }}>{link.icon}</span>
-            {link.label}
-          </Link>
-        );
-      })}
-    </aside>
-  );
-}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -266,9 +202,7 @@ export default function PatientDashboard() {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch' }}>
-      <PatientSidebar />
-      <div style={{ flex: 1, maxWidth: '960px', margin: '0 auto', padding: '24px 20px', width: '100%' }}>
+    <div style={{ maxWidth: '960px', margin: '0 auto', padding: '24px 20px', width: '100%' }}>
         {/* Header */}
         <div style={{ marginBottom: '32px' }}>
           <h1 style={{
@@ -539,6 +473,5 @@ export default function PatientDashboard() {
           )}
         </div>
       </div>
-    </div>
   );
 }

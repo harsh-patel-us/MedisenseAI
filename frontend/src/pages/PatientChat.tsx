@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getToken } from '../api/authApi';
 import {
@@ -673,17 +673,6 @@ export default function PatientChat() {
           >
             ＋ New Chat
           </button>
-          <Link
-            to="/patient"
-            style={{
-              fontSize: '0.78rem',
-              color: 'var(--text-muted)',
-              textDecoration: 'none',
-              textAlign: 'center',
-            }}
-          >
-            ← Back to dashboard
-          </Link>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>

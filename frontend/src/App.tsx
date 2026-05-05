@@ -19,6 +19,8 @@ import SecurityPage from './pages/SecurityPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import ResourcesPage from './pages/ResourcesPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import PatientLayout from './components/patient/PatientLayout';
+import DoctorLayout from './components/doctor/DoctorLayout';
 import './index.css';
 
 /* ── Navigation Bar ──────────────────────────────────────────────────── */
@@ -1183,7 +1185,9 @@ export default function App() {
         <ScrollToTop />
         <div className="bg-mesh" />
         <Navbar />
-        <Routes>
+        <PatientLayoutWrapper>
+        <DoctorLayoutWrapper>
+          <Routes>
           <Route path="/" element={<PublicOnly><LandingPage /></PublicOnly>} />
           <Route path="/about" element={<PublicOnly><AboutPage /></PublicOnly>} />
           <Route path="/contact" element={<PublicOnly><ContactPage /></PublicOnly>} />
@@ -1228,9 +1232,37 @@ export default function App() {
             }
           />
         </Routes>
+        </DoctorLayoutWrapper>
+        </PatientLayoutWrapper>
         <Footer />
         <VisitorOnlyChatbot />
       </Router>
     </AuthProvider>
   );
+}
+
+function PatientLayoutWrapper({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  const isPatientRoute = 
+    location.pathname.startsWith('/patient') || 
+    location.pathname === '/consultation/schedule';
+
+  if (user?.role === 'patient' && isPatientRoute) {
+    return <PatientLayout>{children}</PatientLayout>;
+  }
+  return <>{children}</>;
+}
+
+function DoctorLayoutWrapper({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  const isDoctorRoute = 
+    location.pathname.startsWith('/doctor') || 
+    location.pathname === '/consultation/schedule';
+
+  if (user?.role === 'doctor' && isDoctorRoute) {
+    return <DoctorLayout>{children}</DoctorLayout>;
+  }
+  return <>{children}</>;
 }
