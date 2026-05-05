@@ -41,12 +41,15 @@ export default function Register() {
 
     setSubmitting(true);
     try {
-      const user = await register({
-        full_name: fullName.trim(),
-        email: email.trim(),
-        password,
-        role,
-      });
+      const [user] = await Promise.all([
+        register({
+          full_name: fullName.trim(),
+          email: email.trim(),
+          password,
+          role,
+        }),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
       navigate(user.role === 'doctor' ? '/doctor' : '/patient', { replace: true });
     } catch (err: any) {
       const detail =
@@ -131,8 +134,15 @@ export default function Register() {
             style={{ padding: '12px', justifyContent: 'center', marginTop: 6 }}
           >
             {submitting ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                <span className="spinner" style={{ width: '18px', height: '18px', borderWidth: '2px', borderTopColor: '#fff', borderColor: 'rgba(255,255,255,0.3)' }} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  width: '18px',
+                  height: '18px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  borderTopColor: '#fff',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite'
+                }} />
                 Creating account…
               </span>
             ) : (

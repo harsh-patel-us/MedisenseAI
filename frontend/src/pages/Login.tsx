@@ -26,7 +26,10 @@ export default function Login() {
     setError(null);
     setSubmitting(true);
     try {
-      const user = await login({ email: email.trim(), password, role });
+      const [user] = await Promise.all([
+        login({ email: email.trim(), password, role }),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
       const fallback = user.role === 'doctor' ? '/doctor' : '/patient';
       navigate(state.from?.pathname || fallback, { replace: true });
     } catch (err: any) {
@@ -96,8 +99,15 @@ export default function Login() {
             style={{ padding: '12px', justifyContent: 'center', marginTop: 6 }}
           >
             {submitting ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                <span className="spinner" style={{ width: '18px', height: '18px', borderWidth: '2px', borderTopColor: '#fff', borderColor: 'rgba(255,255,255,0.3)' }} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  width: '18px',
+                  height: '18px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  borderTopColor: '#fff',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite'
+                }} />
                 Signing in…
               </span>
             ) : (
