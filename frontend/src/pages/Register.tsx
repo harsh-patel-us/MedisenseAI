@@ -130,7 +130,14 @@ export default function Register() {
             disabled={submitting}
             style={{ padding: '12px', justifyContent: 'center', marginTop: 6 }}
           >
-            {submitting ? 'Creating account…' : `Register as ${role === 'doctor' ? 'Doctor' : 'Patient'}`}
+            {submitting ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                <span className="spinner" style={{ width: '18px', height: '18px', borderWidth: '2px', borderTopColor: '#fff', borderColor: 'rgba(255,255,255,0.3)' }} />
+                Creating account…
+              </span>
+            ) : (
+              `Register as ${role === 'doctor' ? 'Doctor' : 'Patient'}`
+            )}
           </button>
         </form>
 
