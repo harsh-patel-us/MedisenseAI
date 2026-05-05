@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+// import { useNavigate } from 'react-router-dom';
 // Live recording flow has been replaced with audio-file upload — the
 // useAudioRecorder hook, AudioRecorder mic UI, and LiveTranscript display are
 // no longer used. Imports kept commented for reference.
@@ -19,8 +19,6 @@ import type { UnprocessedSession, ProcessStatusResponse } from '../api/meetApi';
 import type { SoapNote, MedicalEntities, TranscriptSegment } from '../types/doctor.types';
 
 export default function DoctorDashboard() {
-  const navigate = useNavigate();
-
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [soapNote, setSoapNote] = useState<SoapNote | null>(null);
