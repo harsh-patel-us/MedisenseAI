@@ -1,4 +1,5 @@
-export type PatientChatRole = 'user' | 'assistant';
+export type PatientChatRole = 'user' | 'assistant' | 'doctor';
+export type PatientSenderType = 'ai' | 'doctor' | 'patient';
 export type PatientAttachmentKind = 'image' | 'pdf';
 
 export interface ChatFileReference {
@@ -24,6 +25,9 @@ export interface PatientChatMessage {
   content: string;
   created_at: string;
   file_references?: ChatFileReference[];
+  sender_type?: PatientSenderType | null;
+  sender_id?: string | null;
+  sender_name?: string | null;
 }
 
 export interface PatientChatSessionSummary {
@@ -33,6 +37,12 @@ export interface PatientChatSessionSummary {
   title: string | null;
   session_summary: string | null;
   message_count: number;
+  doctor_joined: boolean;
+  specialty: string | null;
+  specialty_name: string | null;
+  assigned_doctor_id?: string | null;
+  assigned_doctor_name?: string | null;
+  session_mode?: 'ai' | 'doctor';
 }
 
 export interface PatientChatSendRequest {
@@ -40,6 +50,29 @@ export interface PatientChatSendRequest {
   session_id?: string | null;
   message?: string | null;
   attachments?: ChatAttachmentUpload[];
+  specialty?: string | null;
+  assigned_doctor_id?: string | null;
+}
+
+export interface DoctorCard {
+  id: string;
+  full_name: string;
+  specialty: string | null;
+  specialty_name: string | null;
+}
+
+export interface DoctorListResponse {
+  doctors: DoctorCard[];
+}
+
+export interface SpecialtyOption {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface SpecialtiesResponse {
+  specialties: SpecialtyOption[];
 }
 
 export interface PatientChatSendResponse {
@@ -56,10 +89,17 @@ export interface PatientChatHistoryResponse {
 export interface PatientChatSessionDetail {
   session_id: string;
   patient_id: string;
+  patient_name?: string | null;
   started_at: string;
   ended_at: string | null;
   session_summary: string | null;
   messages: PatientChatMessage[];
+  doctor_joined: boolean;
+  specialty: string | null;
+  specialty_name: string | null;
+  assigned_doctor_id?: string | null;
+  assigned_doctor_name?: string | null;
+  session_mode?: 'ai' | 'doctor';
 }
 
 export interface EndSessionResponse {

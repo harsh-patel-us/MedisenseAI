@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserRole } from '../types/auth.types';
+import { listPublicSpecialties, type SpecialtyOption } from '../api/authApi';
 
 interface LocationState {
   prefillRole?: UserRole;
@@ -19,8 +20,18 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [specialty, setSpecialty] = useState('');
+  const [specialties, setSpecialties] = useState<SpecialtyOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    listPublicSpecialties()
+      .then((items) => { if (alive) setSpecialties(items); })
+      .catch(() => { /* non-fatal — patients don't need it */ });
+    return () => { alive = false; };
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -38,6 +49,10 @@ export default function Register() {
       setError('Please enter your full name.');
       return;
     }
+    if (role === 'doctor' && !specialty) {
+      setError('Please choose your specialization.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -47,6 +62,7 @@ export default function Register() {
           email: email.trim(),
           password,
           role,
+          specialty: role === 'doctor' ? specialty : null,
         }),
         new Promise(resolve => setTimeout(resolve, 1000))
       ]);
@@ -105,6 +121,13 @@ export default function Register() {
             placeholder={role === 'doctor' ? 'Dr. Priya Shah' : 'John Doe'}
             required
           />
+          {role === 'doctor' && (
+            <SpecialtySelect
+              value={specialty}
+              onChange={setSpecialty}
+              options={specialties}
+            />
+          )}
           <Field
             label="Email"
             type="email"
@@ -195,6 +218,51 @@ function RoleToggle({ role, onChange }: { role: UserRole; onChange: (r: UserRole
         );
       })}
     </div>
+  );
+}
+
+function SpecialtySelect({
+  value, onChange, options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: SpecialtyOption[];
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        Specialization
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        style={{
+          padding: '11px 14px', borderRadius: 10,
+          background: 'rgba(6,13,27,0.6)',
+          border: '1px solid var(--border-subtle)',
+          color: 'var(--text-primary)',
+          fontSize: '0.92rem', outline: 'none',
+          appearance: 'none',
+          backgroundImage: 'linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%)',
+          backgroundPosition: 'calc(100% - 18px) 50%, calc(100% - 13px) 50%',
+          backgroundSize: '5px 5px',
+          backgroundRepeat: 'no-repeat',
+        }}
+        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--brand-teal)')}
+        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
+      >
+        <option value="" disabled>Select your specialization…</option>
+        {options.map((s) => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
+      {value && (
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+          {options.find((s) => s.id === value)?.description}
+        </span>
+      )}
+    </label>
   );
 }
 

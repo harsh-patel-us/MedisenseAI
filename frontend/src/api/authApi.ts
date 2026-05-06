@@ -75,3 +75,23 @@ export async function fetchMe(): Promise<AuthUser> {
   const { data } = await axios.get<AuthUser>(`${API_BASE}/auth/me`);
   return data;
 }
+
+export async function updateMySpecialty(specialty: string): Promise<AuthUser> {
+  const { data } = await axios.put<AuthUser>(`${API_BASE}/auth/me/specialty`, {
+    specialty,
+  });
+  return data;
+}
+
+export interface SpecialtyOption {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export async function listPublicSpecialties(): Promise<SpecialtyOption[]> {
+  const { data } = await axios.get<{ specialties: SpecialtyOption[] }>(
+    `${API_BASE}/auth/specialties`,
+  );
+  return data.specialties;
+}

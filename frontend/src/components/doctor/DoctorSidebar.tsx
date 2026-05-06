@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useDoctorChat } from '../../contexts/DoctorChatContext';
+
+const TEAL = '#05aebb';
 
 const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
   { to: '/doctor', label: 'Dashboard', icon: '🩺' },
@@ -9,11 +12,12 @@ const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
 export default function DoctorSidebar() {
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
+  const { chatList, selectedChatId, setSelectedChatId, chatListLoading } = useDoctorChat();
 
   return (
     <aside
       style={{
-        width: expanded ? 260 : 80,
+        width: expanded ? 280 : 80,
         flexShrink: 0,
         borderRight: '1px solid var(--border-subtle)',
         background: 'rgba(6,13,27,0.85)',
@@ -88,18 +92,6 @@ export default function DoctorSidebar() {
                 gap: 12,
                 transition: 'all 0.2s ease',
               }}
-              onMouseEnter={(e) => {
-                if (!active) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                  e.currentTarget.style.color = 'var(--text-primary)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!active) {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = 'var(--text-secondary)';
-                }
-              }}
             >
               <span style={{ 
                 fontSize: '1.2rem',
@@ -109,6 +101,92 @@ export default function DoctorSidebar() {
             </Link>
           );
         })}
+      </div>
+
+      {/* ── Patient Chats Section ── */}
+      <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+        {expanded && (
+          <div style={{
+            fontSize: '0.72rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.8px',
+            color: 'var(--text-muted)',
+            fontWeight: 800,
+            paddingLeft: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <span>Patient Chats</span>
+            {chatListLoading && <div className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />}
+          </div>
+        )}
+
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: 4, 
+          overflowY: 'auto',
+          paddingRight: expanded ? 4 : 0,
+        }}>
+          {chatList.length === 0 && expanded && !chatListLoading && (
+            <div style={{ padding: '12px 16px', fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              No active chats
+            </div>
+          )}
+
+          {chatList.slice(0, 8).map((chat) => {
+            const active = selectedChatId === chat.id;
+            const isDoctorMode = chat.session_mode === 'doctor';
+
+            return (
+              <button
+                key={chat.id}
+                onClick={() => setSelectedChatId(chat.id)}
+                title={!expanded ? `Chat with ${chat.patient_name}` : undefined}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  background: active ? 'rgba(5,174,187,0.15)' : 'transparent',
+                  border: 'none',
+                  borderLeft: active ? `3px solid ${TEAL}` : '3px solid transparent',
+                  padding: expanded ? '10px 12px' : '12px',
+                  cursor: 'pointer',
+                  borderRadius: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: expanded ? 'flex-start' : 'center' }}>
+                  <div style={{ 
+                    width: 32, height: 32, borderRadius: '50%', 
+                    background: isDoctorMode ? TEAL : 'rgba(15,30,60,0.6)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.9rem', flexShrink: 0,
+                    border: active ? `1px solid ${TEAL}` : '1px solid var(--border-subtle)'
+                  }}>
+                    {chat.patient_name.charAt(0)}
+                  </div>
+                  {expanded && (
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ 
+                        fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' 
+                      }}>
+                        {chat.patient_name}
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: isDoctorMode ? TEAL : 'var(--text-muted)', fontWeight: 600 }}>
+                        {isDoctorMode ? 'Live with you' : 'MediSense AI'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ marginTop: 'auto', padding: expanded ? '12px' : '0' }}>

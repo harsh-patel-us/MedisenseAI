@@ -1,11 +1,14 @@
 import axios from 'axios';
 import type {
   ChatAttachmentUpload,
+  DoctorListResponse,
   EndSessionResponse,
   PatientChatHistoryResponse,
   PatientChatSendResponse,
   PatientChatSessionDetail,
+  SpecialtiesResponse,
 } from '../types/patientChatbot.types';
+import { getToken } from './authApi';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -15,6 +18,8 @@ export async function sendPatientChatMessage(
   message: string | null,
   attachments: ChatAttachmentUpload[] = [],
   signal?: AbortSignal,
+  specialty: string | null = null,
+  assignedDoctorId: string | null = null,
 ): Promise<PatientChatSendResponse> {
   const { data } = await axios.post<PatientChatSendResponse>(
     `${API_BASE}/patient/chat/message`,
@@ -23,8 +28,51 @@ export async function sendPatientChatMessage(
       session_id: sessionId,
       message,
       attachments,
+      specialty,
+      assigned_doctor_id: assignedDoctorId,
     },
     { timeout: 120000, signal },
+  );
+  return data;
+}
+
+export async function listDoctors(): Promise<DoctorListResponse> {
+  const { data } = await axios.get<DoctorListResponse>(
+    `${API_BASE}/patient/chat/doctors`,
+  );
+  return data;
+}
+
+/**
+ * Open a WebSocket against the chat session. The browser can't set headers
+ * on the upgrade request, so we pass the bearer token as a query param. The
+ * server validates ownership before completing the handshake.
+ *
+ * Returns the WS instance — caller is responsible for assigning handlers
+ * (`onmessage`, `onclose`, etc.) and closing it on unmount.
+ */
+export function openChatWebSocket(sessionId: string): WebSocket | null {
+  const token = getToken();
+  if (!token) return null;
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.host;
+  // API_BASE may be either '/api' (vite proxy) or 'https://...'. Normalize.
+  let pathPrefix = API_BASE;
+  if (/^https?:\/\//.test(API_BASE)) {
+    const url = new URL(API_BASE);
+    pathPrefix = url.pathname.replace(/\/$/, '');
+  }
+  const url = `${proto}://${host}${pathPrefix}/patient/chat/ws/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`;
+  try {
+    return new WebSocket(url);
+  } catch {
+    return null;
+  }
+}
+
+export async function listSpecialties(): Promise<SpecialtiesResponse> {
+  const { data } = await axios.get<SpecialtiesResponse>(
+    `${API_BASE}/patient/chat/specialties`,
   );
   return data;
 }

@@ -8,7 +8,8 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ChatRole = Literal["user", "assistant"]
+ChatRole = Literal["user", "assistant", "doctor"]
+SenderType = Literal["ai", "doctor", "patient"]
 AttachmentKind = Literal["image", "pdf"]
 
 
@@ -42,6 +43,11 @@ class PatientChatMessageDTO(BaseModel):
     content: str
     created_at: datetime
     file_references: List[ChatFileReference] = Field(default_factory=list)
+    # Canonical attribution. Older rows without sender_type fall back to a
+    # value derived from `role` so the UI can render them consistently.
+    sender_type: Optional[SenderType] = None
+    sender_id: Optional[str] = None
+    sender_name: Optional[str] = None
 
 
 class PatientChatSessionSummary(BaseModel):
@@ -51,6 +57,12 @@ class PatientChatSessionSummary(BaseModel):
     title: Optional[str] = None
     session_summary: Optional[str] = None
     message_count: int
+    doctor_joined: bool = False
+    specialty: Optional[str] = None
+    specialty_name: Optional[str] = None
+    assigned_doctor_id: Optional[str] = None
+    assigned_doctor_name: Optional[str] = None
+    session_mode: str = "ai"
 
 
 class PatientChatRequest(BaseModel):
@@ -59,12 +71,18 @@ class PatientChatRequest(BaseModel):
     `message` is optional — if omitted (or empty) and no attachments are
     provided, the server treats this as a "give me my personalised welcome"
     request, creates a new session, and returns a greeting that already
-    references the patient's history.
+    references the patient's history. `assigned_doctor_id` is required when
+    starting a new session (no session_id) and ignored otherwise — the AI
+    role-plays that doctor and the session is routed to them.
     """
     patient_id: str
     session_id: Optional[str] = None
     message: Optional[str] = Field(default=None, max_length=4000)
     attachments: List[ChatAttachmentDTO] = Field(default_factory=list)
+    assigned_doctor_id: Optional[str] = None
+    # Legacy specialty-only flow. If `assigned_doctor_id` is set, we read the
+    # specialty off the doctor's profile and ignore this field.
+    specialty: Optional[str] = None
 
 
 class PatientChatResponse(BaseModel):
@@ -81,10 +99,17 @@ class PatientChatHistoryResponse(BaseModel):
 class PatientChatSessionMessagesResponse(BaseModel):
     session_id: str
     patient_id: str
+    patient_name: Optional[str] = None
     started_at: datetime
     ended_at: Optional[datetime] = None
     session_summary: Optional[str] = None
     messages: List[PatientChatMessageDTO]
+    doctor_joined: bool = False
+    specialty: Optional[str] = None
+    specialty_name: Optional[str] = None
+    assigned_doctor_id: Optional[str] = None
+    assigned_doctor_name: Optional[str] = None
+    session_mode: str = "ai"
 
 
 class EndSessionRequest(BaseModel):
@@ -126,3 +151,30 @@ class PatientTTSResponse(BaseModel):
     provider: str   # "sarvam" | "none"
     language: Optional[str] = None
     speaker: Optional[str] = None
+
+
+# ── Specialty picker ─────────────────────────────────────────────────────
+
+
+class SpecialtyOption(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class SpecialtiesResponse(BaseModel):
+    specialties: List[SpecialtyOption]
+
+
+# ── Doctor picker (patient-facing) ───────────────────────────────────────
+
+
+class DoctorCard(BaseModel):
+    id: str
+    full_name: str
+    specialty: Optional[str] = None
+    specialty_name: Optional[str] = None
+
+
+class DoctorListResponse(BaseModel):
+    doctors: List[DoctorCard]

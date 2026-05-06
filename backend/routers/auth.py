@@ -16,6 +16,7 @@ from models.auth_models import (
     AuthResponse,
     LoginRequest,
     RegisterRequest,
+    UpdateSpecialtyRequest,
     UserPublic,
 )
 from services.auth_service import (
@@ -24,6 +25,7 @@ from services.auth_service import (
     hash_password,
     verify_password,
 )
+from services.specialties import SPECIALTIES, SPECIALTY_IDS
 from utils.helpers import generate_id
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ def _to_public(user: User) -> UserPublic:
         full_name=user.full_name,
         role=user.role,  # type: ignore[arg-type]
         created_at=user.created_at,
+        specialty=user.specialty,
     )
 
 
@@ -48,12 +51,29 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    specialty: str | None = None
+    if body.role == "doctor":
+        # Specialization is mandatory for doctors — patients pick doctors by
+        # specialty when starting a chat.
+        if not body.specialty:
+            raise HTTPException(
+                status_code=400,
+                detail="Please choose your specialization.",
+            )
+        if body.specialty not in SPECIALTY_IDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown specialty: {body.specialty}.",
+            )
+        specialty = body.specialty
+
     user = User(
         id=generate_id(),
         email=email,
         password_hash=hash_password(body.password),
         full_name=body.full_name.strip(),
         role=body.role,
+        specialty=specialty,
     )
     db.add(user)
     await db.commit()
@@ -85,4 +105,33 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: User = Depends(get_current_user)):
+    return _to_public(user)
+
+
+@router.get("/specialties")
+async def list_public_specialties():
+    """Public list of specialties — used by the doctor registration form
+    before any token exists."""
+    return {
+        "specialties": [
+            {"id": s["id"], "name": s["name"], "description": s["description"]}
+            for s in SPECIALTIES
+        ]
+    }
+
+
+@router.put("/me/specialty", response_model=UserPublic)
+async def update_specialty(
+    body: UpdateSpecialtyRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set the calling doctor's specialty. Only doctors may set this."""
+    if user.role != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors have a specialty.")
+    if body.specialty not in SPECIALTY_IDS:
+        raise HTTPException(status_code=400, detail=f"Unknown specialty: {body.specialty}.")
+    user.specialty = body.specialty
+    await db.commit()
+    await db.refresh(user)
     return _to_public(user)

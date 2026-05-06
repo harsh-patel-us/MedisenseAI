@@ -9,6 +9,8 @@ import {
   getChatAttachment,
   getPatientChatHistory,
   getPatientChatSession,
+  listDoctors,
+  openChatWebSocket,
   sendPatientChatMessage,
   transcribeVoiceMessage,
   synthesizeTTS,
@@ -16,6 +18,7 @@ import {
 import type {
   ChatAttachmentUpload,
   ChatFileReference,
+  DoctorCard,
   PatientChatMessage,
   PatientChatSessionSummary,
 } from '../types/patientChatbot.types';
@@ -189,7 +192,18 @@ export default function PatientChat() {
   // ── TTS state ────────────────────────────────────────────────────
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
+  const [doctorJoined, setDoctorJoined] = useState(false);
   const ttsAudioRef = useRef<AudioContext | null>(null);
+
+  // ── Doctor picker state ──────────────────────────────────────────
+  const [doctors, setDoctors] = useState<DoctorCard[]>([]);
+  // The doctor whose specialty the AI is role-playing for the active chat.
+  // Set from the picker before the first send of a new chat, or hydrated
+  // from the loaded session detail when an existing chat is opened.
+  const [currentDoctor, setCurrentDoctor] = useState<DoctorCard | null>(null);
+  // session_mode: "ai" while the AI is answering, "doctor" once the assigned
+  // human takes over. Drives the patient-side status banner.
+  const [sessionMode, setSessionMode] = useState<'ai' | 'doctor'>('ai');
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -244,6 +258,22 @@ export default function PatientChat() {
     void refreshHistory();
   }, [refreshHistory]);
 
+  // Load the directory of registered doctors once.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listDoctors();
+        if (!cancelled) setDoctors(res.doctors);
+      } catch (err) {
+        console.error('Failed to load doctors', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /* ── Auto-save + summarize on leave ────────────────────────────── */
   useEffect(() => {
     const handleUnload = () => {
@@ -285,6 +315,9 @@ export default function PatientChat() {
     setError(null);
     setInput('');
     setPending([]);
+    setCurrentDoctor(null);
+    setSessionMode('ai');
+    setDoctorJoined(false);
     void refreshHistory();
   }, [patientId, refreshHistory]);
 
@@ -311,6 +344,18 @@ export default function PatientChat() {
       try {
         const detail = await getPatientChatSession(s.id);
         setMessages(detail.messages.map((m) => ({ ...m })));
+        setDoctorJoined(detail.doctor_joined);
+        setSessionMode(detail.session_mode || 'ai');
+        if (detail.assigned_doctor_id) {
+          setCurrentDoctor({
+            id: detail.assigned_doctor_id,
+            full_name: detail.assigned_doctor_name || 'Your Doctor',
+            specialty: detail.specialty,
+            specialty_name: detail.specialty_name,
+          });
+        } else {
+          setCurrentDoctor(null);
+        }
       } catch (err) {
         console.error('Failed to load session', err);
         setError('Could not load that conversation.');
@@ -364,6 +409,13 @@ export default function PatientChat() {
     const trimmed = input.trim();
     if (!trimmed && pending.length === 0) return;
 
+    // Brand-new chat (no session id yet) MUST carry a doctor so the AI
+    // knows which specialist to play and the right doctor sees it.
+    if (!activeSessionRef.current && !currentDoctor) {
+      setError('Please pick a doctor before sending your first message.');
+      return;
+    }
+
     setError(null);
     setSending(true);
 
@@ -382,14 +434,17 @@ export default function PatientChat() {
       created_at: new Date().toISOString(),
       file_references: optimisticRefs,
     };
-    const loadingMsg: UiMessage = {
-      id: `local-loading-${Date.now()}`,
-      role: 'assistant',
-      content: '',
-      created_at: new Date().toISOString(),
-      pending: true,
-    };
-    setMessages((prev) => [...prev, optimisticMsg, loadingMsg]);
+    const loadingMsg: UiMessage | null = !doctorJoined
+      ? {
+          id: `local-loading-${Date.now()}`,
+          role: 'assistant',
+          content: '',
+          created_at: new Date().toISOString(),
+          pending: true,
+        }
+      : null;
+
+    setMessages((prev) => (loadingMsg ? [...prev, optimisticMsg, loadingMsg] : [...prev, optimisticMsg]));
 
     // Clear the input immediately so the user can type the next turn.
     const pendingSnapshot = pending;
@@ -409,7 +464,7 @@ export default function PatientChat() {
     } catch (err) {
       console.error('Failed to encode attachments', err);
       setError('Could not read the attached file.');
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticUserId && m.id !== loadingMsg.id));
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticUserId && (!loadingMsg || m.id !== loadingMsg.id)));
       setSending(false);
       // Restore previews so the user can retry.
       setPending(pendingSnapshot);
@@ -422,6 +477,9 @@ export default function PatientChat() {
         activeSessionRef.current,
         trimmed || null,
         attachmentsPayload,
+        undefined,
+        null,
+        activeSessionRef.current ? null : currentDoctor?.id ?? null,
       );
 
       sentSomethingRef.current = true;
@@ -430,21 +488,38 @@ export default function PatientChat() {
         activeSessionRef.current = res.session_id;
       }
 
-      const assistantMsg: UiMessage = {
-        id: `srv-${Date.now()}`,
-        role: 'assistant',
-        content: res.reply,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) =>
-        prev
-          .filter((m) => m.id !== loadingMsg.id)
-          .concat(assistantMsg),
-      );
+      if (loadingMsg) {
+        if (res.reply) {
+          const assistantMsg: UiMessage = {
+            id: `srv-${Date.now()}`,
+            role: 'assistant',
+            content: res.reply,
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => {
+            // If the WebSocket already pushed the real message (broadcast happens at the end
+            // of the backend handler), don't add the manual one.
+            if (
+              prev.some(
+                (m) =>
+                  m.role === 'assistant' &&
+                  m.content === res.reply &&
+                  !m.id.startsWith('srv-') &&
+                  !m.pending
+              )
+            ) {
+              return prev.filter((m) => m.id !== loadingMsg.id);
+            }
+            return prev.filter((m) => m.id !== loadingMsg.id).concat(assistantMsg);
+          });
 
-      // Auto-play TTS if enabled
-      if (ttsEnabled && res.reply) {
-        playTTS(res.reply);
+          // Auto-play TTS if enabled
+          if (ttsEnabled) {
+            playTTS(res.reply);
+          }
+        } else {
+          setMessages((prev) => prev.filter((m) => m.id !== loadingMsg.id));
+        }
       }
 
       // Release object URLs for sent images now that previews are gone.
@@ -455,11 +530,13 @@ export default function PatientChat() {
     } catch (err: unknown) {
       console.error('Send failed', err);
       setError("Sorry, I couldn't reach Medisense AI. Please try again.");
-      setMessages((prev) => prev.filter((m) => m.id !== loadingMsg.id));
+      if (loadingMsg) {
+        setMessages((prev) => prev.filter((m) => m.id !== loadingMsg.id));
+      }
     } finally {
       setSending(false);
     }
-  }, [input, pending, patientId, refreshHistory, sending, ttsEnabled]);
+  }, [input, pending, patientId, refreshHistory, sending, ttsEnabled, doctorJoined, currentDoctor]);
 
   /* ── Drag & drop ───────────────────────────────────────────────── */
   const [dragOver, setDragOver] = useState(false);
@@ -589,14 +666,91 @@ export default function PatientChat() {
     }
   }, []);
 
-  // Cleanup audio context on unmount
+  /* ── Live updates via WebSocket ────────────────────────────────── */
+  // Subscribes to the chat session's WS channel so doctor-typed messages,
+  // server-side AI replies, and mode-change events flow in without polling.
+  // Reconnects with capped exponential backoff if the socket drops.
   useEffect(() => {
+    if (!activeSessionId || !patientId) return;
+
+    let ws: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      ws = openChatWebSocket(activeSessionId);
+      if (!ws) return;
+
+      ws.onopen = () => {
+        retryCount = 0;
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          if (payload.type === 'mode_change') {
+            setSessionMode(payload.session_mode === 'doctor' ? 'doctor' : 'ai');
+            setDoctorJoined(Boolean(payload.doctor_joined));
+          } else if (payload.type === 'message' && payload.message) {
+            const incoming = payload.message as PatientChatMessage;
+            setMessages((prev) => {
+              // 1. If we already have this exact message ID, skip.
+              if (prev.some((m) => m.id === incoming.id)) return prev;
+
+              // 2. Filter out:
+              //    - any pending "AI is thinking" bubbles
+              //    - any optimistic user messages (id: local-*) IF this is a user message
+              //    - any manual AI messages from the REST response (id: srv-*) IF this is an assistant message
+              const filtered = prev.filter((m) => {
+                // If an assistant message arrived, drop the loading bubble.
+                if (m.pending && incoming.role === 'assistant') return false;
+                // If a user message arrived, keep the bubble (so it doesn't flicker).
+                if (m.pending && incoming.role === 'user') return true;
+
+                // Replace local optimistic user message with the real one.
+                if (incoming.role === 'user' && m.id.startsWith('local-')) return false;
+                // Replace the manual REST reply with the real one from WS.
+                if (incoming.role === 'assistant' && m.id.startsWith('srv-')) return false;
+
+                return true;
+              });
+
+              return [...filtered, incoming];
+            });
+            if (ttsEnabled && incoming.role !== 'user' && incoming.content) {
+              playTTS(incoming.content);
+            }
+          }
+        } catch (err) {
+          console.error('WS payload parse failed', err);
+        }
+      };
+
+      ws.onclose = () => {
+        if (cancelled) return;
+        if (retryCount < 5) {
+          const delay = Math.min(1500 * Math.pow(1.6, retryCount), 15000);
+          retryCount += 1;
+          retryTimer = setTimeout(connect, delay);
+        }
+      };
+    };
+
+    connect();
+
     return () => {
-      if (ttsAudioRef.current) {
-        ttsAudioRef.current.close().catch(() => { });
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (ws) {
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onopen = null;
+        try { ws.close(); } catch { /* ignore */ }
       }
     };
-  }, []);
+  }, [activeSessionId, patientId, ttsEnabled, playTTS]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -619,7 +773,10 @@ export default function PatientChat() {
 
   /* ── Render ────────────────────────────────────────────────────── */
 
-  const canSend = !sending && (input.trim().length > 0 || pending.length > 0);
+  const composerLocked = !activeSessionId && !currentDoctor;
+  const currentSpecialtyName = currentDoctor?.specialty_name || currentDoctor?.specialty || '';
+  const canSend =
+    !sending && !composerLocked && (input.trim().length > 0 || pending.length > 0);
 
   return (
     <div
@@ -740,6 +897,21 @@ export default function PatientChat() {
                         }}
                       >
                         {sessionTitle(s)}
+                        {s.doctor_joined && (
+                          <span style={{
+                            marginLeft: 8,
+                            fontSize: '0.62rem',
+                            background: TEAL,
+                            color: '#fff',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            fontWeight: 800,
+                            verticalAlign: 'middle',
+                            display: 'inline-block',
+                          }}>
+                            DOCTOR JOINED
+                          </span>
+                        )}
                       </div>
                       <div
                         style={{
@@ -754,6 +926,20 @@ export default function PatientChat() {
                       >
                         {shortSummary(s)}
                       </div>
+                      {s.specialty_name && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: '0.66rem',
+                            color: TEAL,
+                            fontWeight: 700,
+                            letterSpacing: '0.4px',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          🩺 {s.specialty_name}
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -796,9 +982,20 @@ export default function PatientChat() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <BotAvatar size={38} />
             <div>
-              <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>MediSense AI</div>
+              <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>
+                {currentDoctor ? currentDoctor.full_name : 'MediSense AI'}
+                {currentSpecialtyName && (
+                  <span style={{ color: TEAL, marginLeft: 8 }}>
+                    · {currentSpecialtyName}
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                Online · powered by MediSense AI
+                {currentDoctor
+                  ? sessionMode === 'doctor'
+                    ? `Live · ${currentDoctor.full_name} is responding directly`
+                    : `Online · MediSense AI standing in for ${currentDoctor.full_name}`
+                  : 'Online · pick a doctor to begin'}
               </div>
             </div>
           </div>
@@ -857,13 +1054,48 @@ export default function PatientChat() {
             gap: 14,
           }}
         >
+          {doctorJoined && (
+            <div
+              style={{
+                background: 'rgba(5, 174, 187, 0.15)',
+                border: `1px solid ${TEAL}`,
+                color: '#fff',
+                padding: '12px 20px',
+                borderRadius: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                margin: '0 0 10px 0',
+                animation: 'ms-thinking-fade-in 0.4s ease-out',
+              }}
+            >
+              <span style={{ fontSize: 24 }}>👨‍⚕️</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>A real specialist has joined your chat</div>
+                <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>MediSense AI is currently in read-only mode while you speak with the doctor.</div>
+              </div>
+            </div>
+          )}
+
           {sessionLoading && (
             <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 32 }}>
               Loading conversation…
             </div>
           )}
 
-          {!sessionLoading && messages.length === 0 && (
+          {!sessionLoading && messages.length === 0 && !activeSessionId && !currentDoctor && (
+            <DoctorPicker
+              doctors={doctors}
+              firstName={user?.full_name?.split(' ')[0] ?? 'there'}
+              onSelect={(doc) => {
+                setCurrentDoctor(doc);
+                setError(null);
+                setTimeout(() => inputRef.current?.focus(), 50);
+              }}
+            />
+          )}
+
+          {!sessionLoading && messages.length === 0 && currentDoctor && (
             <div
               style={{
                 margin: 'auto',
@@ -875,14 +1107,31 @@ export default function PatientChat() {
             >
               <div style={{ fontSize: '1.6rem', marginBottom: 14 }}>👋</div>
               <h2 style={{ fontSize: '1.25rem', marginBottom: 10, color: 'var(--text-primary)' }}>
-                Hi {user?.full_name?.split(' ')[0] ?? 'there'}, I'm MediSense AI.
+                Hi {user?.full_name?.split(' ')[0] ?? 'there'}, you're now connected with{' '}
+                {currentDoctor.full_name}
+                {currentSpecialtyName ? `, ${currentSpecialtyName}` : ''}.
               </h2>
               <p style={{ fontSize: '0.92rem' }}>
-                Ask me about a symptom, a medication, or upload a recent lab
-                report or photo (JPG, PNG, or PDF). I remember your past
-                conversations and reports, so feel free to ask follow-up
-                questions any time.
+                Tell me what's going on. MediSense AI is standing in for{' '}
+                {currentDoctor.full_name} until they're ready to take over —
+                they'll step in directly when they can.
               </p>
+              <button
+                type="button"
+                onClick={() => setCurrentDoctor(null)}
+                style={{
+                  marginTop: 12,
+                  background: 'transparent',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 999,
+                  padding: '6px 14px',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                ← Pick a different doctor
+              </button>
             </div>
           )}
 
@@ -1047,8 +1296,12 @@ export default function PatientChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={sending}
-              placeholder="Ask MediSense AI anything…"
+              disabled={sending || composerLocked}
+              placeholder={
+                composerLocked
+                  ? 'Pick a specialist above to begin…'
+                  : 'Ask MediSense AI anything…'
+              }
               rows={1}
               maxLength={4000}
               style={{
@@ -1130,6 +1383,7 @@ export default function PatientChat() {
 
 function MessageBubble({ msg }: { msg: UiMessage }) {
   const isUser = msg.role === 'user';
+  const isDoctor = msg.role === 'doctor';
   const refs = msg.file_references ?? [];
 
   return (
@@ -1140,21 +1394,45 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
         gap: 10,
       }}
     >
-      {!isUser && <BotAvatar size={34} />}
+      {isDoctor ? (
+        <div style={{
+          fontSize: 20,
+          width: 34,
+          height: 34,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(5, 174, 187, 0.2)',
+          borderRadius: '50%',
+          flexShrink: 0,
+        }}>👨‍⚕️</div>
+      ) : (!isUser && <BotAvatar size={34} />)}
       <div
         style={{
           maxWidth: '70%',
-          background: isUser ? TEAL : 'rgba(15,30,60,0.85)',
+          background: isUser ? TEAL : isDoctor ? 'rgba(15, 30, 60, 0.95)' : 'rgba(15,30,60,0.85)',
+          border: isDoctor ? `1.5px solid ${TEAL}` : 'none',
           color: isUser ? '#fff' : 'var(--text-primary)',
           padding: '10px 14px',
           borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
+          boxShadow: isDoctor ? `0 0 12px ${TEAL}33` : '0 1px 4px rgba(0,0,0,0.18)',
           fontSize: '0.92rem',
           lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          position: 'relative',
         }}
       >
+        {isDoctor && (
+          <div style={{
+            fontSize: '0.65rem',
+            fontWeight: 800,
+            color: TEAL,
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+            marginBottom: 4,
+          }}>Attending Specialist</div>
+        )}
         {refs.length > 0 && (
           <div
             style={{
@@ -1349,6 +1627,164 @@ function AttachmentPreview({
       >
         ×
       </button>
+    </div>
+  );
+}
+
+/* ── Specialist Picker ──────────────────────────────────────────── */
+
+function specialistEmoji(id: string): string {
+  switch (id) {
+    case 'cardiologist':
+      return '❤️';
+    case 'neurologist':
+      return '🧠';
+    case 'dermatologist':
+      return '🧴';
+    case 'pediatrician':
+      return '🧒';
+    case 'gynecologist':
+      return '🌸';
+    case 'orthopedist':
+      return '🦴';
+    case 'psychiatrist':
+      return '🧘';
+    case 'endocrinologist':
+      return '⚖️';
+    case 'gastroenterologist':
+      return '🫃';
+    case 'general_physician':
+    default:
+      return '🩺';
+  }
+}
+
+function DoctorPicker({
+  doctors,
+  firstName,
+  onSelect,
+}: {
+  doctors: DoctorCard[];
+  firstName: string;
+  onSelect: (d: DoctorCard) => void;
+}) {
+  // Group by specialty so the directory reads like a real clinic listing.
+  const grouped = useMemo(() => {
+    const buckets = new Map<string, { name: string; doctors: DoctorCard[] }>();
+    for (const d of doctors) {
+      const key = d.specialty || 'unknown';
+      const label = d.specialty_name || d.specialty || 'General';
+      const bucket = buckets.get(key) || { name: label, doctors: [] };
+      bucket.doctors.push(d);
+      buckets.set(key, bucket);
+    }
+    return Array.from(buckets.entries())
+      .map(([key, b]) => ({ key, name: b.name, doctors: b.doctors }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [doctors]);
+
+  return (
+    <div
+      style={{
+        margin: 'auto',
+        maxWidth: 720,
+        width: '100%',
+        color: 'var(--text-secondary)',
+        lineHeight: 1.5,
+      }}
+    >
+      <div style={{ textAlign: 'center', fontSize: '1.6rem', marginBottom: 10 }}>👋</div>
+      <h2
+        style={{
+          textAlign: 'center',
+          fontSize: '1.25rem',
+          marginBottom: 8,
+          color: 'var(--text-primary)',
+        }}
+      >
+        Hi {firstName}, choose a doctor to start
+      </h2>
+      <p style={{ textAlign: 'center', fontSize: '0.9rem', marginBottom: 20 }}>
+        MediSense AI will stand in for the doctor you pick until they're ready
+        to take over the chat themselves.
+      </p>
+      {doctors.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          Loading doctors…
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {grouped.map((g) => (
+            <div key={g.key}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  color: TEAL,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.6px',
+                  marginBottom: 8,
+                  padding: '0 4px',
+                }}
+              >
+                <span>{specialistEmoji(g.key)}</span>
+                {g.name}
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                  gap: 10,
+                }}
+              >
+                {g.doctors.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => onSelect(d)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '12px 14px',
+                      background: 'rgba(15,30,60,0.55)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 12,
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = TEAL;
+                      e.currentTarget.style.background = 'rgba(5,174,187,0.10)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                      e.currentTarget.style.background = 'rgba(15,30,60,0.55)';
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
+                      {d.full_name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.74rem',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {d.specialty_name || d.specialty || 'General Physician'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

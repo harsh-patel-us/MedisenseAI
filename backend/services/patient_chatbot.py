@@ -45,6 +45,7 @@ from prompts import (
 from database import PatientAnalysisRecord, PatientChatSession, User
 from services.claude_service import get_client
 from services.report_parser import parse_uploaded_file
+from services.specialties import get_specialty
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,8 @@ class ChatContext:
     db: Optional[AsyncSession]
     attachments: list[ChatAttachment] = field(default_factory=list)
     session_attachments: list[SessionAttachmentMemo] = field(default_factory=list)
+    specialty_id: Optional[str] = None
+    doctor_name: Optional[str] = None
 
 
 # ── Context builder used both by the system prompt and the history tool ─
@@ -186,7 +189,19 @@ def format_system_prompt(
     profile: dict[str, str],
     report_summary: str,
     past_session_summaries: str,
+    specialty_id: Optional[str] = None,
+    doctor_name: Optional[str] = None,
 ) -> str:
+    spec = get_specialty(specialty_id)
+    if spec:
+        specialist_role = spec["system_role"]
+        specialist_title = spec["name"]
+    else:
+        specialist_role = (
+            "a board-certified General Physician who handles primary care, "
+            "common infections, fevers, and overall wellbeing"
+        )
+        specialist_title = "General Physician"
     return PATIENT_CHATBOT_SYSTEM_PROMPT.format(
         patient_name=profile.get("patient_name", "Patient"),
         patient_age=profile.get("patient_age", "Not on file"),
@@ -194,6 +209,9 @@ def format_system_prompt(
         patient_blood_group=profile.get("patient_blood_group", "Not on file"),
         patient_report_summaries=report_summary,
         past_session_summaries=past_session_summaries,
+        specialist_role=specialist_role,
+        specialist_title=specialist_title,
+        doctor_name=doctor_name or f"Dr. MediSense {specialist_title}",
     )
 
 
@@ -309,6 +327,8 @@ def _dynamic_instructions(
     }
     report_summary = getattr(base, "_report_summary", "No prior reports uploaded yet.")
     past_summary = getattr(base, "_past_summaries", "No prior conversations on file.")
+    specialty_id = base.specialty_id
+    doctor_name = base.doctor_name
 
     attachments_block = ""
     if base.attachments:
@@ -346,7 +366,9 @@ def _dynamic_instructions(
         )
 
     return (
-        format_system_prompt(profile, report_summary, past_summary)
+        format_system_prompt(
+            profile, report_summary, past_summary, specialty_id, doctor_name
+        )
         + session_attachments_block
         + attachments_block
     )
@@ -433,6 +455,8 @@ async def generate_chat_reply(
     user_message: str | None,
     attachments: list[ChatAttachment] | None = None,
     session_attachments: list[SessionAttachmentMemo] | None = None,
+    specialty_id: Optional[str] = None,
+    doctor_name: Optional[str] = None,
 ) -> str:
     """Run one turn through Medisense AI and return the assistant reply text."""
     attachments = attachments or []
@@ -445,6 +469,8 @@ async def generate_chat_reply(
         db=db,
         attachments=attachments,
         session_attachments=session_attachments,
+        specialty_id=specialty_id,
+        doctor_name=doctor_name,
     )
     # Stash on the dataclass via private attrs — read by `_dynamic_instructions`.
     ctx._patient_name = profile["patient_name"]            # type: ignore[attr-defined]

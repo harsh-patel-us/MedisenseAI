@@ -86,3 +86,38 @@ class UploadAudioResponse(BaseModel):
     session_id: str
     transcript: List[TranscriptSegment]
     raw_text: str
+
+
+class DoctorChatActiveSession(BaseModel):
+    id: str
+    patient_id: str
+    patient_name: str
+    started_at: str
+    title: Optional[str]
+    doctor_joined: bool
+    specialty: Optional[str] = None
+    specialty_name: Optional[str] = None
+
+
+class DoctorChatListItem(BaseModel):
+    """One row in the doctor's "Patient Chats" sidebar."""
+    id: str
+    patient_id: str
+    patient_name: str
+    started_at: str
+    ended_at: Optional[str] = None
+    title: Optional[str] = None
+    specialty: Optional[str] = None
+    specialty_name: Optional[str] = None
+    session_mode: str  # "ai" | "doctor"
+    last_message_at: Optional[str] = None
+    last_message_preview: Optional[str] = None
+    last_message_sender: Optional[str] = None  # "ai" | "doctor" | "patient"
+
+
+class DoctorChatListResponse(BaseModel):
+    items: List[DoctorChatListItem]
+
+
+class DoctorChatMessageRequest(BaseModel):
+    message: str

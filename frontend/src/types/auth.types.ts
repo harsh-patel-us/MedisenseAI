@@ -6,6 +6,8 @@ export interface AuthUser {
   full_name: string;
   role: UserRole;
   created_at: string;
+  /** Doctors only — id of the medical specialty they cover. */
+  specialty?: string | null;
 }
 
 export interface AuthResponse {
@@ -19,6 +21,8 @@ export interface RegisterRequest {
   email: string;
   password: string;
   role: UserRole;
+  /** Required when `role === 'doctor'`. */
+  specialty?: string | null;
 }
 
 export interface LoginRequest {

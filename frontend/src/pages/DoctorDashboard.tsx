@@ -16,6 +16,11 @@ import {
   getProcessStatus,
 } from '../api/meetApi';
 import type { UnprocessedSession, ProcessStatusResponse } from '../api/meetApi';
+import { listSpecialties } from '../api/patientChatbotApi';
+import type { SpecialtyOption } from '../types/patientChatbot.types';
+import { updateMySpecialty } from '../api/authApi';
+import { useAuth } from '../contexts/AuthContext';
+
 import type { SoapNote, MedicalEntities, TranscriptSegment } from '../types/doctor.types';
 
 export default function DoctorDashboard() {
@@ -143,8 +148,49 @@ export default function DoctorDashboard() {
     }
   };
 
+  /* ── Doctor Specialty state ──────────────────────────────────── */
+  const { user, setUser } = useAuth();
+  const [specialties, setSpecialties] = useState<SpecialtyOption[]>([]);
+  const [savingSpecialty, setSavingSpecialty] = useState(false);
+  const [specialtyDraft, setSpecialtyDraft] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listSpecialties();
+        if (!cancelled) setSpecialties(res.specialties);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSaveSpecialty = useCallback(async () => {
+    if (!specialtyDraft) return;
+    setSavingSpecialty(true);
+    try {
+      const updated = await updateMySpecialty(specialtyDraft);
+      setUser(updated);
+      setSpecialtyDraft('');
+    } catch (err) {
+      console.error('Failed to save specialty', err);
+      alert('Could not save your specialty. Please try again.');
+    } finally {
+      setSavingSpecialty(false);
+    }
+  }, [specialtyDraft, setUser]);
+
+  const currentSpecialtyName =
+    specialties.find((s) => s.id === user?.specialty)?.name || user?.specialty || '';
+
+
+
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px 20px' }}>
+    <div style={{ flex: 1, minWidth: 0, maxWidth: '1200px', margin: '0 auto', padding: '24px 20px' }}>
       {/* Header */}
       <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <div>
@@ -155,7 +201,27 @@ export default function DoctorDashboard() {
           }}>
             🩺 Doctor Dashboard
           </h1>
-          <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {user?.full_name && (
+              <span style={{ fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
+                Welcome, <strong style={{ color: 'var(--text-primary)' }}>{user.full_name}</strong>
+              </span>
+            )}
+            {currentSpecialtyName && (
+              <span style={{
+                padding: '4px 10px',
+                borderRadius: 999,
+                background: 'rgba(45, 212, 191, 0.12)',
+                border: '1px solid rgba(45, 212, 191, 0.35)',
+                color: '#5eead4',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+              }}>
+                🩺 {currentSpecialtyName}
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: 6 }}>
             Upload a consultation audio file or schedule a Google Meet — both flow into AI-generated SOAP notes
           </p>
         </div>
@@ -281,7 +347,7 @@ export default function DoctorDashboard() {
       </div>
 
       {/* Responsive override */}
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         @media (max-width: 900px) {
           div[style*="gridTemplateColumns: '1fr 1fr'"],
           div[style*="grid-template-columns"] {
@@ -289,7 +355,7 @@ export default function DoctorDashboard() {
             flex-direction: column !important;
           }
         }
-      `}</style>
+      ` }} />
 
       {/* ── Process Google Meet Consultation ──────────────────────── */}
       <div style={{ marginTop: 32 }}>
@@ -528,6 +594,58 @@ export default function DoctorDashboard() {
           </div>
         )}
       </div>
+
+      {!user?.specialty && (
+        <div style={{ marginTop: 32 }}>
+          <div
+            className="glass-card"
+            style={{ padding: '24px 28px' }}
+            id="specialty-onboarding"
+          >
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: 6 }}>
+              Choose your specialty
+            </h2>
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', marginBottom: 14 }}>
+              Patients pick a specific doctor when they start a chat. Set your
+              specialty so you appear in their picker and chats can be routed
+              to you.
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <select
+                value={specialtyDraft}
+                onChange={(e) => setSpecialtyDraft(e.target.value)}
+                style={{
+                  flex: 1,
+                  minWidth: 220,
+                  background: 'rgba(15,30,60,0.6)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  color: '#fff',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                }}
+              >
+                <option value="">Select a specialty…</option>
+                {specialties.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn-primary"
+                onClick={handleSaveSpecialty}
+                disabled={!specialtyDraft || savingSpecialty}
+                style={{ padding: '10px 18px', fontSize: '0.85rem' }}
+              >
+                {savingSpecialty ? 'Saving…' : 'Save specialty'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

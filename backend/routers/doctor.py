@@ -7,6 +7,7 @@ GET  /doctor/sessions      → Past consultation sessions
 """
 import json
 import logging
+from typing import List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,19 +16,27 @@ from datetime import datetime
 
 from config import settings
 from models.doctor_models import (
-    GenerateNoteRequest, GenerateNoteResponse,
-    SoapNote, MedicalEntities, ExportPdfRequest, SessionSummary,
     TranscriptSegment, UploadAudioResponse,
+    DoctorChatActiveSession, DoctorChatListItem, DoctorChatListResponse,
+    DoctorChatMessageRequest,
+    GenerateNoteRequest, GenerateNoteResponse,
+    MedicalEntities, SoapNote, ExportPdfRequest, SessionSummary,
 )
+from models.patient_chatbot_models import (
+    PatientChatSessionMessagesResponse, PatientChatMessageDTO, ChatFileReference,
+)
+
 from services.transcription import transcribe_audio
 from services.diarization import diarize
 from services.ner import extract_medical_entities
 from services.claude_service import generate_soap_note
+from services.chat_ws import chat_manager
 from services.pdf_export import generate_soap_pdf
 from services.auth_service import require_role
+from services.specialties import specialty_name
 from utils.helpers import generate_id, format_transcript_for_prompt, validate_file_size
 from utils.storage import save_soap_pdf
-from database import get_db, ConsultationSession, User
+from database import get_db, ConsultationSession, DoctorChatSession, User, PatientChatSession, PatientChatMessage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/doctor", tags=["doctor"])
@@ -346,3 +355,379 @@ async def get_sessions(
         )
         for s in sessions
     ]
+
+
+# ── Doctor-Patient Chat Handoff ──────────────────────────────────────────
+
+@router.get("/active-chats", response_model=List[DoctorChatActiveSession])
+async def get_active_patient_chats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """List the active chats explicitly assigned to this doctor."""
+    from sqlalchemy import desc, join
+
+    stmt = (
+        select(
+            PatientChatSession.id,
+            PatientChatSession.patient_id,
+            User.full_name.label("patient_name"),
+            PatientChatSession.started_at,
+            PatientChatSession.title,
+            PatientChatSession.doctor_joined,
+            PatientChatSession.specialty,
+        )
+        .select_from(join(PatientChatSession, User, PatientChatSession.patient_id == User.id))
+        .where(PatientChatSession.ended_at == None)
+        .where(PatientChatSession.assigned_doctor_id == _user.id)
+        .order_by(desc(PatientChatSession.started_at))
+        .limit(20)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return [
+        DoctorChatActiveSession(
+            id=row.id,
+            patient_id=row.patient_id,
+            patient_name=row.patient_name,
+            started_at=row.started_at.isoformat(),
+            title=row.title,
+            doctor_joined=bool(row.doctor_joined),
+            specialty=row.specialty,
+            specialty_name=specialty_name(row.specialty) if row.specialty else None,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/chat-sessions", response_model=DoctorChatListResponse)
+async def get_doctor_chat_sessions(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Every patient chat ever assigned to this doctor — active and past.
+
+    Powers the "Patient Chats" sidebar on the doctor dashboard. Each row
+    carries enough context (patient name, last-message preview + timestamp,
+    AI/Doctor mode) to render the list without a follow-up call.
+    """
+    from sqlalchemy import desc, join, func
+
+    stmt = (
+        select(
+            PatientChatSession.id,
+            PatientChatSession.patient_id,
+            User.full_name.label("patient_name"),
+            PatientChatSession.started_at,
+            PatientChatSession.ended_at,
+            PatientChatSession.title,
+            PatientChatSession.specialty,
+            PatientChatSession.session_mode,
+        )
+        .select_from(join(PatientChatSession, User, PatientChatSession.patient_id == User.id))
+        .where(PatientChatSession.assigned_doctor_id == _user.id)
+        .order_by(desc(PatientChatSession.started_at))
+        .limit(100)
+    )
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return DoctorChatListResponse(items=[])
+
+    session_ids = [r.id for r in rows]
+
+    # Find the most recent message per session in one query.
+    last_subq = (
+        select(
+            PatientChatMessage.session_id,
+            func.max(PatientChatMessage.created_at).label("max_created"),
+        )
+        .where(PatientChatMessage.session_id.in_(session_ids))
+        .group_by(PatientChatMessage.session_id)
+        .subquery()
+    )
+    last_msgs_stmt = (
+        select(PatientChatMessage)
+        .join(
+            last_subq,
+            (PatientChatMessage.session_id == last_subq.c.session_id)
+            & (PatientChatMessage.created_at == last_subq.c.max_created),
+        )
+    )
+    last_msgs = (await db.execute(last_msgs_stmt)).scalars().all()
+    last_by_session: dict[str, PatientChatMessage] = {m.session_id: m for m in last_msgs}
+
+    items: list[DoctorChatListItem] = []
+    for r in rows:
+        last = last_by_session.get(r.id)
+        preview = None
+        last_at = None
+        last_sender = None
+        if last is not None:
+            text = (last.content or "").strip()
+            preview = text if len(text) <= 120 else text[:117] + "…"
+            last_at = last.created_at.isoformat() if last.created_at else None
+            last_sender = last.sender_type or (
+                "patient" if last.role == "user"
+                else "doctor" if last.role == "doctor"
+                else "ai"
+            )
+        items.append(
+            DoctorChatListItem(
+                id=r.id,
+                patient_id=r.patient_id,
+                patient_name=r.patient_name,
+                started_at=r.started_at.isoformat() if r.started_at else "",
+                ended_at=r.ended_at.isoformat() if r.ended_at else None,
+                title=r.title,
+                specialty=r.specialty,
+                specialty_name=specialty_name(r.specialty) if r.specialty else None,
+                session_mode=(r.session_mode or "ai"),
+                last_message_at=last_at,
+                last_message_preview=preview,
+                last_message_sender=last_sender,
+            )
+        )
+    return DoctorChatListResponse(items=items)
+
+
+def _ensure_doctor_assigned(doctor: User, session: PatientChatSession) -> None:
+    """Block a doctor from acting on a chat that wasn't assigned to them.
+
+    Phase 2: assignment is by `assigned_doctor_id` (the patient picked this
+    specific doctor). Specialty alone is no longer enough.
+    """
+    if session.assigned_doctor_id and session.assigned_doctor_id != doctor.id:
+        raise HTTPException(
+            status_code=403,
+            detail="This chat is assigned to a different doctor.",
+        )
+    if not session.assigned_doctor_id:
+        # Legacy row: fall back to specialty match so historical chats still open.
+        if not doctor.specialty:
+            raise HTTPException(
+                status_code=403,
+                detail="Set your specialty before opening this legacy chat.",
+            )
+        if session.specialty and session.specialty != doctor.specialty:
+            raise HTTPException(
+                status_code=403,
+                detail="This chat is outside your specialty.",
+            )
+
+
+@router.get("/chat/{session_id}", response_model=PatientChatSessionMessagesResponse)
+async def get_patient_chat_for_doctor(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Allow a doctor to view a patient's full chat history."""
+    session = await db.get(PatientChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_doctor_assigned(_user, session)
+
+    from sqlalchemy import asc
+    msgs = (
+        await db.execute(
+            select(PatientChatMessage)
+            .where(PatientChatMessage.session_id == session_id)
+            .order_by(asc(PatientChatMessage.created_at))
+        )
+    ).scalars().all()
+
+    # Helper to parse file refs (duplicated from patient_chatbot for now)
+    def _parse_file_refs(blob: Optional[str]) -> list[ChatFileReference]:
+        if not blob: return []
+        try:
+            items = json.loads(blob)
+            return [ChatFileReference(**item) for item in items] if isinstance(items, list) else []
+        except: return []
+
+    # Resolve patient + assigned-doctor display names so the panel header is
+    # populated without an extra round-trip.
+    patient = await db.get(User, session.patient_id)
+    patient_name = patient.full_name if patient else None
+    assigned_doctor_name = None
+    if session.assigned_doctor_id:
+        assigned = await db.get(User, session.assigned_doctor_id)
+        assigned_doctor_name = assigned.full_name if assigned else None
+
+    def _sender_for(m: PatientChatMessage) -> str:
+        if m.sender_type:
+            return m.sender_type
+        if m.role == "user":
+            return "patient"
+        if m.role == "doctor":
+            return "doctor"
+        return "ai"
+
+    return PatientChatSessionMessagesResponse(
+        session_id=session.id,
+        patient_id=session.patient_id,
+        patient_name=patient_name,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        doctor_joined=bool(session.doctor_joined),
+        specialty=session.specialty,
+        specialty_name=specialty_name(session.specialty) if session.specialty else None,
+        assigned_doctor_id=session.assigned_doctor_id,
+        assigned_doctor_name=assigned_doctor_name,
+        session_mode=(session.session_mode or "ai"),
+        messages=[
+            PatientChatMessageDTO(
+                id=m.id,
+                role=m.role,
+                content=m.content,
+                created_at=m.created_at,
+                file_references=_parse_file_refs(m.file_references),
+                sender_type=_sender_for(m),
+                sender_id=m.sender_id,
+                sender_name=(
+                    patient_name if _sender_for(m) == "patient"
+                    else assigned_doctor_name if _sender_for(m) == "doctor"
+                    else None
+                ),
+            )
+            for m in msgs
+        ]
+    )
+
+
+@router.post("/chat/{session_id}/toggle-ai")
+async def toggle_chat_ai(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Join (disable AI) or hand back (re-enable AI) for a patient chat.
+
+    Flips both `doctor_joined` and `session_mode`, drops a system note into
+    the transcript, and broadcasts both events over the chat WebSocket so
+    the patient and any other doctor tab update without a page refresh.
+    """
+    session = await db.get(PatientChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_doctor_assigned(_user, session)
+
+    was_joined = bool(session.doctor_joined)
+    session.doctor_joined = not was_joined
+    session.session_mode = "doctor" if not was_joined else "ai"
+
+    note = (
+        f"Dr. {_user.full_name} has joined the chat and is now responding "
+        f"directly to you."
+        if not was_joined
+        else (
+            f"Dr. {_user.full_name} has stepped away — MediSense AI will "
+            f"continue answering until the doctor returns."
+        )
+    )
+    msg = PatientChatMessage(
+        id=generate_id(),
+        session_id=session.id,
+        patient_id=session.patient_id,
+        role="doctor",
+        sender_type="doctor",
+        sender_id=_user.id,
+        content=note,
+        created_at=datetime.utcnow(),
+    )
+    db.add(msg)
+    await db.commit()
+
+    # Push both the mode change AND the system note as a regular message so
+    # listeners can update header status and append the line in one trip.
+    try:
+        await chat_manager.broadcast(
+            session.id,
+            {
+                "type": "mode_change",
+                "session_id": session.id,
+                "session_mode": session.session_mode,
+                "doctor_joined": bool(session.doctor_joined),
+                "doctor_id": _user.id,
+                "doctor_name": _user.full_name,
+            },
+        )
+        await chat_manager.broadcast(
+            session.id,
+            {
+                "type": "message",
+                "session_id": session.id,
+                "message": {
+                    "id": msg.id,
+                    "role": "doctor",
+                    "sender_type": "doctor",
+                    "sender_id": _user.id,
+                    "sender_name": _user.full_name,
+                    "content": note,
+                    "created_at": msg.created_at.isoformat(),
+                    "file_references": [],
+                },
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"toggle-ai broadcast failed for {session.id}: {exc}")
+
+    return {
+        "doctor_joined": bool(session.doctor_joined),
+        "session_mode": session.session_mode,
+    }
+
+
+@router.post("/chat/{session_id}/message")
+async def send_doctor_message(
+    session_id: str,
+    payload: DoctorChatMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Send a message as the doctor to the patient.
+
+    Stamps sender attribution and pushes the message over the chat WebSocket
+    so the patient sees it instantly.
+    """
+    session = await db.get(PatientChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_doctor_assigned(_user, session)
+
+    msg = PatientChatMessage(
+        id=generate_id(),
+        session_id=session_id,
+        patient_id=session.patient_id,
+        role="doctor",
+        sender_type="doctor",
+        sender_id=_user.id,
+        content=payload.message,
+        created_at=datetime.utcnow(),
+    )
+    db.add(msg)
+    await db.commit()
+
+    try:
+        await chat_manager.broadcast(
+            session.id,
+            {
+                "type": "message",
+                "session_id": session.id,
+                "message": {
+                    "id": msg.id,
+                    "role": "doctor",
+                    "sender_type": "doctor",
+                    "sender_id": _user.id,
+                    "sender_name": _user.full_name,
+                    "content": payload.message,
+                    "created_at": msg.created_at.isoformat(),
+                    "file_references": [],
+                },
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"doctor-message broadcast failed for {session.id}: {exc}")
+
+    return {"status": "ok", "message_id": msg.id}

@@ -86,6 +86,11 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)  # "doctor" | "patient"
 
+    # For doctors: the medical specialty they cover (id from
+    # services.specialties). Patients leave this NULL. Used to filter
+    # /doctor/active-chats to chats whose patient picked this specialty.
+    specialty: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     # ── Google Calendar OAuth ────────────────────────────────────────────
     # Populated when the user connects their Google account on the schedule
     # page. Used to insert calendar events (with Google Meet links) on their
@@ -216,6 +221,24 @@ class PatientChatSession(Base):
     session_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     last_summary_at_count: Mapped[int] = mapped_column(Integer, default=0)
+    doctor_joined: Mapped[bool] = mapped_column(Integer, default=False)  # Using Integer for boolean cross-db compatibility
+
+    # Specialty the patient picked when starting this chat (id from
+    # services.specialties). Drives the AI's role-play system prompt and
+    # routes the session to doctors of the matching specialty.
+    specialty: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # The specific doctor the patient chose. The AI plays this doctor's
+    # role/specialty until the human takes over. Indexed so the doctor's
+    # sidebar (listing all chats assigned to them) is cheap.
+    assigned_doctor_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
+
+    # Authoritative live mode: "ai" (AI replies) or "doctor" (the assigned
+    # doctor is replying directly). The legacy `doctor_joined` flag mirrors
+    # this for backwards compatibility on existing read paths.
+    session_mode: Mapped[str] = mapped_column(String, default="ai")
 
     __table_args__ = (
         Index("ix_patient_chat_sessions_patient_started", "patient_id", "started_at"),
@@ -238,13 +261,21 @@ class PatientChatMessage(Base):
     patient_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id"), nullable=False, index=True
     )
-    role: Mapped[str] = mapped_column(String, nullable=False)  # "user" | "assistant"
+    role: Mapped[str] = mapped_column(String, nullable=False)  # "user" | "assistant" | "doctor"
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     message_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
     # JSON list of {filename, mime_type, size_bytes, kind: "image"|"pdf"} entries
     # describing files the patient attached on this turn. Raw bytes are not stored.
     file_references: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Canonical attribution. `sender_type` is one of "ai" | "doctor" | "patient".
+    # `sender_id` is the user.id of the doctor or patient (NULL for AI). The
+    # legacy `role` column is kept in sync for back-compat.
+    sender_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sender_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
 
     __table_args__ = (
         Index("ix_patient_chat_messages_session_created", "session_id", "created_at"),
@@ -283,6 +314,39 @@ class PatientChatAttachment(Base):
 
     __table_args__ = (
         Index("ix_patient_chat_attachments_session_created", "session_id", "created_at"),
+    )
+
+
+class DoctorChatSession(Base):
+    """Junction row linking a doctor to a patient chat session.
+
+    Created the moment the patient picks a doctor on the chat picker — that's
+    what powers the doctor's "Patient Chats" sidebar. We keep this as a
+    separate row (not just a FK on the session) so the doctor's listing query
+    is index-only and we can later support handoffs to a different doctor
+    by deactivating this row and creating a new one.
+    """
+    __tablename__ = "doctor_chat_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    doctor_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("patient_chat_sessions.id"), nullable=False, index=True
+    )
+    patient_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_active: Mapped[bool] = mapped_column(Integer, default=True)
+
+    __table_args__ = (
+        Index(
+            "ix_doctor_chat_sessions_doctor_assigned",
+            "doctor_id",
+            "assigned_at",
+        ),
     )
 
 
@@ -354,9 +418,15 @@ async def init_db():
             ],
             "patient_chat_messages": [
                 ("file_references", "TEXT"),
+                ("sender_type", "VARCHAR"),
+                ("sender_id", "VARCHAR"),
             ],
             "patient_chat_sessions": [
                 ("title", "VARCHAR"),
+                ("doctor_joined", "INTEGER DEFAULT 0"),
+                ("specialty", "VARCHAR"),
+                ("assigned_doctor_id", "VARCHAR"),
+                ("session_mode", "VARCHAR DEFAULT 'ai'"),
             ],
             "users": [
                 ("google_email", "VARCHAR"),
@@ -364,6 +434,7 @@ async def init_db():
                 ("google_access_token", "TEXT"),
                 ("google_token_expiry", "TIMESTAMP"),
                 ("google_scopes", "TEXT"),
+                ("specialty", "VARCHAR"),
             ],
         }
 

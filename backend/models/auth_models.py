@@ -14,6 +14,9 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
     role: Role
+    # Required for doctors — id from services.specialties (e.g. "cardiologist").
+    # Ignored for patients.
+    specialty: str | None = Field(default=None, max_length=80)
 
 
 class LoginRequest(BaseModel):
@@ -28,9 +31,15 @@ class UserPublic(BaseModel):
     full_name: str
     role: Role
     created_at: datetime
+    # Doctors only — id of their medical specialty (one of services.specialties).
+    specialty: str | None = None
 
 
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserPublic
+
+
+class UpdateSpecialtyRequest(BaseModel):
+    specialty: str = Field(..., min_length=1, max_length=80)
