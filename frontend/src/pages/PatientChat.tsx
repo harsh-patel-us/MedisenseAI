@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getToken } from '../api/authApi';
 import {
@@ -25,6 +25,7 @@ import type {
 
 const TEAL = '#05aebb';
 const TEAL_DARK = '#0f6e56';
+const THINKING_STYLE_ID = 'ms-thinking-styles';
 const ACCEPT_MIME = 'image/jpeg,image/jpg,image/png,application/pdf';
 const MAX_FILE_MB = 20;
 
@@ -96,12 +97,24 @@ function bucketOrder(b: string): number {
   return 4;
 }
 
+function specialistEmoji(specialty: string): string {
+  const s = specialty.toLowerCase();
+  if (s.includes('cardio')) return '❤️';
+  if (s.includes('neuro')) return '🧠';
+  if (s.includes('pediat')) return '🧒';
+  if (s.includes('derm')) return '🧴';
+  if (s.includes('psych')) return '🧘';
+  if (s.includes('ortho')) return '🦴';
+  if (s.includes('gastro')) return '🧪';
+  return '🩺';
+}
+
 function shortSummary(s: PatientChatSessionSummary): string {
   if (s.session_summary && s.session_summary.trim()) {
     const t = s.session_summary.trim();
     return t.length > 100 ? t.slice(0, 100) + '…' : t;
   }
-  return s.message_count > 0 ? `${s.message_count} messages` : 'New chat';
+  return s.message_count > 0 ? `${s.message_count} messages` : 'Consultation';
 }
 
 function sessionTitle(s: PatientChatSessionSummary): string {
@@ -119,7 +132,7 @@ function sessionTitle(s: PatientChatSessionSummary): string {
         : firstSentence;
     }
   }
-  return 'New chat';
+  return 'Consultation';
 }
 
 /* ── Components ─────────────────────────────────────────────────────── */
@@ -170,6 +183,7 @@ function BotAvatar({ size = 36 }: { size?: number }) {
 export default function PatientChat() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const patientId = user?.id ?? '';
 
   const [sessions, setSessions] = useState<PatientChatSessionSummary[]>([]);
@@ -296,6 +310,19 @@ export default function PatientChat() {
     };
   }, [patientId]);
 
+  /* ── Handle navigation state ─────────────────────────────────── */
+  useEffect(() => {
+    const state = location.state as { doctorId?: string } | null;
+    if (state?.doctorId && doctors.length > 0) {
+      const doc = doctors.find((d) => d.id === state.doctorId);
+      if (doc) {
+        // Clear state so it doesn't trigger again
+        window.history.replaceState({}, document.title);
+        void handleSelectDoctorFromSidebar(doc);
+      }
+    }
+  }, [location.state, doctors]);
+
   /* ── Session selection ─────────────────────────────────────────── */
 
   const startNewChat = useCallback(async () => {
@@ -364,6 +391,23 @@ export default function PatientChat() {
       }
     },
     [patientId],
+  );
+
+  const handleSelectDoctorFromSidebar = useCallback(
+    async (doc: DoctorCard) => {
+      // If we already have a session for this doctor, open it.
+      // We look for the most recent session with this doctor.
+      const existing = sessions.find((s) => s.assigned_doctor_id === doc.id);
+      if (existing) {
+        void openSession(existing);
+      } else {
+        // Start fresh
+        await startNewChat();
+        setCurrentDoctor(doc);
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    },
+    [sessions, openSession, startNewChat],
   );
 
   /* ── File handling ─────────────────────────────────────────────── */
@@ -813,138 +857,96 @@ export default function PatientChat() {
             <div style={{ lineHeight: 1.2 }}>
               <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>MediSense AI</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                Your AI medical companion
+                Registered Specialists
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={startNewChat}
-            className="btn-primary"
-            style={{
-              width: '100%',
-              justifyContent: 'center',
-              padding: '10px 12px',
-              fontSize: '0.88rem',
-            }}
-          >
-            ＋ New Chat
-          </button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
-          {historyLoading ? (
+          <div
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.6px',
+              color: 'var(--text-muted)',
+              padding: '4px 10px 10px',
+              borderBottom: '1px solid var(--border-subtle)',
+              marginBottom: 8,
+            }}
+          >
+            Active Specialists
+          </div>
+          {doctors.length === 0 ? (
             <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-              Loading conversations…
-            </div>
-          ) : groupedSessions.length === 0 ? (
-            <div
-              style={{
-                padding: 16,
-                color: 'var(--text-muted)',
-                fontSize: '0.82rem',
-                lineHeight: 1.5,
-              }}
-            >
-              No past conversations yet. Start a new chat to ask MediSense AI
-              anything about your health.
+              No specialists available.
             </div>
           ) : (
-            groupedSessions.map(([bucket, items]) => (
-              <div key={bucket} style={{ marginBottom: 14 }}>
-                <div
+            doctors.map((doc) => {
+              const active = currentDoctor?.id === doc.id;
+              const hasSession = sessions.some((s) => s.assigned_doctor_id === doc.id);
+              return (
+                <button
+                  key={doc.id}
+                  type="button"
+                  onClick={() => void handleSelectDoctorFromSidebar(doc)}
                   style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.6px',
-                    color: 'var(--text-muted)',
-                    padding: '4px 10px 6px',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: active ? 'rgba(5,174,187,0.15)' : 'transparent',
+                    border: 'none',
+                    borderLeft: active ? `3px solid ${TEAL}` : '3px solid transparent',
+                    color: 'var(--text-primary)',
+                    padding: '12px 12px',
+                    cursor: 'pointer',
+                    borderRadius: 10,
+                    marginBottom: 6,
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  {bucket}
-                </div>
-                {items.map((s) => {
-                  const active = s.id === activeSessionId;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => void openSession(s)}
+                  <div style={{ fontSize: '1.4rem', opacity: active ? 1 : 0.7 }}>
+                    {specialistEmoji(doc.specialty || '')}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
                       style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        background: active ? 'rgba(5,174,187,0.15)' : 'transparent',
-                        border: 'none',
-                        borderLeft: active
-                          ? `3px solid ${TEAL}`
-                          : '3px solid transparent',
-                        color: 'var(--text-primary)',
-                        padding: '10px 12px',
-                        cursor: 'pointer',
-                        borderRadius: 8,
-                        marginBottom: 4,
+                        fontSize: '0.88rem',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        color: active ? TEAL : 'var(--text-primary)',
                       }}
                     >
-                      <div
-                        style={{
-                          fontSize: '0.84rem',
-                          fontWeight: 600,
-                          marginBottom: 3,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {sessionTitle(s)}
-                        {s.doctor_joined && (
-                          <span style={{
-                            marginLeft: 8,
-                            fontSize: '0.62rem',
-                            background: TEAL,
-                            color: '#fff',
-                            padding: '2px 6px',
-                            borderRadius: 4,
-                            fontWeight: 800,
-                            verticalAlign: 'middle',
-                            display: 'inline-block',
-                          }}>
-                            DOCTOR JOINED
-                          </span>
-                        )}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '0.74rem',
-                          color: 'var(--text-secondary)',
-                          lineHeight: 1.4,
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {shortSummary(s)}
-                      </div>
-                      {s.specialty_name && (
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: '0.66rem',
-                            color: TEAL,
-                            fontWeight: 700,
-                            letterSpacing: '0.4px',
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          🩺 {s.specialty_name}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))
+                      {doc.full_name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.72rem',
+                        color: 'var(--text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.4px',
+                      }}
+                    >
+                      {doc.specialty_name || doc.specialty || 'Physician'}
+                    </div>
+                  </div>
+                  {hasSession && !active && (
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: TEAL, opacity: 0.6 }} title="Previous chat exists" />
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       </aside>
@@ -1084,15 +1086,40 @@ export default function PatientChat() {
           )}
 
           {!sessionLoading && messages.length === 0 && !activeSessionId && !currentDoctor && (
-            <DoctorPicker
-              doctors={doctors}
-              firstName={user?.full_name?.split(' ')[0] ?? 'there'}
-              onSelect={(doc) => {
-                setCurrentDoctor(doc);
-                setError(null);
-                setTimeout(() => inputRef.current?.focus(), 50);
+            <div
+              style={{
+                margin: 'auto',
+                maxWidth: 480,
+                textAlign: 'center',
+                color: 'var(--text-secondary)',
+                padding: '40px 20px',
               }}
-            />
+            >
+              <div style={{ fontSize: '2.5rem', marginBottom: 20 }}>👋</div>
+              <h2 style={{ fontSize: '1.4rem', marginBottom: 12, color: 'var(--text-primary)' }}>
+                Welcome to MediSense Consultations
+              </h2>
+              <p style={{ fontSize: '0.95rem', lineHeight: 1.6, opacity: 0.8 }}>
+                To begin, please select a specialist from the <strong>Active Specialists</strong> list on the left panel.
+              </p>
+              <div
+                style={{
+                  marginTop: 24,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 16px',
+                  borderRadius: 20,
+                  background: 'rgba(5, 174, 187, 0.1)',
+                  border: `1px solid ${TEAL}44`,
+                  color: TEAL,
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                }}
+              >
+                <span>←</span> Select a doctor to start your session
+              </div>
+            </div>
           )}
 
           {!sessionLoading && messages.length === 0 && currentDoctor && (
@@ -1112,9 +1139,9 @@ export default function PatientChat() {
                 {currentSpecialtyName ? `, ${currentSpecialtyName}` : ''}.
               </h2>
               <p style={{ fontSize: '0.92rem' }}>
-                Tell me what's going on. MediSense AI is standing in for{' '}
+                Tell me what's going on. I am MediSense AI, standing in for{' '}
                 {currentDoctor.full_name} until they're ready to take over —
-                they'll step in directly when they can.
+                I have access to your medical history to assist you.
               </p>
               <button
                 type="button"
@@ -1174,181 +1201,179 @@ export default function PatientChat() {
         )}
 
         {/* Composer */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-          style={{
-            padding: '12px 24px 18px',
-            borderTop: '1px solid var(--border-subtle)',
-            background: 'rgba(6,13,27,0.55)',
-            flexShrink: 0,
-          }}
-        >
-          <div
+        {!composerLocked && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
             style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              gap: 10,
-              background: 'rgba(15,30,60,0.6)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 18,
-              padding: '8px 8px 8px 14px',
+              padding: '12px 24px 18px',
+              borderTop: '1px solid var(--border-subtle)',
+              background: 'rgba(6,13,27,0.55)',
+              flexShrink: 0,
             }}
           >
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={sending}
-              title="Attach JPG, PNG, or PDF"
-              aria-label="Attach file"
+            <div
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: sending ? 'not-allowed' : 'pointer',
-                padding: 8,
-                fontSize: 18,
-                lineHeight: 1,
+                display: 'flex',
+                alignItems: 'flex-end',
+                gap: 10,
+                background: 'rgba(15,30,60,0.6)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 18,
+                padding: '8px 8px 8px 14px',
               }}
             >
-              📎
-            </button>
-            {/* Microphone button */}
-            <button
-              type="button"
-              onClick={isVoiceRecording ? stopVoiceRecording : startVoiceRecording}
-              disabled={sending || voiceTranscribing}
-              title={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
-              aria-label={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
-              id="voice-record-btn"
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending}
+                title="Attach JPG, PNG, or PDF"
+                aria-label="Attach file"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: sending ? 'not-allowed' : 'pointer',
+                  padding: 8,
+                  fontSize: 18,
+                  lineHeight: 1,
+                }}
+              >
+                📎
+              </button>
+              {/* Microphone button */}
+              <button
+                type="button"
+                onClick={isVoiceRecording ? stopVoiceRecording : startVoiceRecording}
+                disabled={sending || voiceTranscribing}
+                title={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
+                aria-label={isVoiceRecording ? 'Stop recording' : 'Record voice message'}
+                id="voice-record-btn"
+                style={{
+                  background: isVoiceRecording
+                    ? 'rgba(220,38,38,0.2)'
+                    : voiceTranscribing
+                      ? 'rgba(5,174,187,0.15)'
+                      : 'transparent',
+                  border: isVoiceRecording
+                    ? '1px solid rgba(220,38,38,0.5)'
+                    : 'none',
+                  color: isVoiceRecording
+                    ? '#f87171'
+                    : voiceTranscribing
+                      ? TEAL
+                      : 'var(--text-secondary)',
+                  cursor: (sending || voiceTranscribing) ? 'not-allowed' : 'pointer',
+                  padding: 8,
+                  fontSize: 18,
+                  lineHeight: 1,
+                  borderRadius: '50%',
+                  transition: 'all 0.2s ease',
+                  position: 'relative',
+                }}
+              >
+                {voiceTranscribing ? (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 18,
+                      height: 18,
+                      border: `2px solid ${TEAL}`,
+                      borderTopColor: 'transparent',
+                      borderRadius: '50%',
+                      animation: 'spin 0.8s linear infinite',
+                    }}
+                  />
+                ) : isVoiceRecording ? (
+                  <>
+                    <span style={{ position: 'relative' }}>
+                      🎙️
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -2,
+                          right: -4,
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: '#dc2626',
+                          animation: 'pulse-dot 1.2s infinite',
+                        }}
+                      />
+                    </span>
+                  </>
+                ) : (
+                  '🎤'
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPT_MIME}
+                multiple
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = '';
+                }}
+                style={{ display: 'none' }}
+              />
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={sending}
+                placeholder="Describe your symptoms or ask a question…"
+                rows={1}
+                maxLength={4000}
+                style={{
+                  flex: 1,
+                  minHeight: 24,
+                  maxHeight: 160,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  resize: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.92rem',
+                  lineHeight: 1.5,
+                  padding: '6px 4px',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label="Send"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: '50%',
+                  background: canSend ? TEAL : 'rgba(5,174,187,0.25)',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: canSend ? 'pointer' : 'not-allowed',
+                  fontSize: 16,
+                }}
+              >
+                {sending ? '…' : '➤'}
+              </button>
+            </div>
+            <div
               style={{
-                background: isVoiceRecording
-                  ? 'rgba(220,38,38,0.2)'
-                  : voiceTranscribing
-                    ? 'rgba(5,174,187,0.15)'
-                    : 'transparent',
-                border: isVoiceRecording
-                  ? '1px solid rgba(220,38,38,0.5)'
-                  : 'none',
-                color: isVoiceRecording
-                  ? '#f87171'
-                  : voiceTranscribing
-                    ? TEAL
-                    : 'var(--text-secondary)',
-                cursor: (sending || voiceTranscribing) ? 'not-allowed' : 'pointer',
-                padding: 8,
-                fontSize: 18,
-                lineHeight: 1,
-                borderRadius: '50%',
-                transition: 'all 0.2s ease',
-                position: 'relative',
+                fontSize: '0.7rem',
+                color: 'var(--text-muted)',
+                marginTop: 8,
+                textAlign: 'center',
               }}
             >
-              {voiceTranscribing ? (
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 18,
-                    height: 18,
-                    border: `2px solid ${TEAL}`,
-                    borderTopColor: 'transparent',
-                    borderRadius: '50%',
-                    animation: 'spin 0.8s linear infinite',
-                  }}
-                />
-              ) : isVoiceRecording ? (
-                <>
-                  <span style={{ position: 'relative' }}>
-                    🎙️
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: -2,
-                        right: -4,
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: '#dc2626',
-                        animation: 'pulse-dot 1.2s infinite',
-                      }}
-                    />
-                  </span>
-                </>
-              ) : (
-                '🎤'
-              )}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPT_MIME}
-              multiple
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = '';
-              }}
-              style={{ display: 'none' }}
-            />
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={sending || composerLocked}
-              placeholder={
-                composerLocked
-                  ? 'Pick a specialist above to begin…'
-                  : 'Ask MediSense AI anything…'
-              }
-              rows={1}
-              maxLength={4000}
-              style={{
-                flex: 1,
-                minHeight: 24,
-                maxHeight: 160,
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                resize: 'none',
-                color: 'var(--text-primary)',
-                fontSize: '0.92rem',
-                lineHeight: 1.5,
-                padding: '6px 4px',
-                fontFamily: 'inherit',
-              }}
-            />
-            <button
-              type="submit"
-              disabled={!canSend}
-              aria-label="Send"
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '50%',
-                background: canSend ? TEAL : 'rgba(5,174,187,0.25)',
-                color: '#fff',
-                border: 'none',
-                cursor: canSend ? 'pointer' : 'not-allowed',
-                fontSize: 16,
-              }}
-            >
-              {sending ? '…' : '➤'}
-            </button>
-          </div>
-          <div
-            style={{
-              fontSize: '0.7rem',
-              color: 'var(--text-muted)',
-              marginTop: 8,
-              textAlign: 'center',
-            }}
-          >
-            MediSense AI provides educational guidance only — always consult a
-            licensed clinician for medical decisions.
-          </div>
-        </form>
+              MediSense AI provides educational guidance only — always consult a
+              licensed clinician for medical decisions.
+            </div>
+          </form>
+        )}
 
         {/* Drag overlay */}
         {dragOver && (
@@ -1631,167 +1656,9 @@ function AttachmentPreview({
   );
 }
 
-/* ── Specialist Picker ──────────────────────────────────────────── */
 
-function specialistEmoji(id: string): string {
-  switch (id) {
-    case 'cardiologist':
-      return '❤️';
-    case 'neurologist':
-      return '🧠';
-    case 'dermatologist':
-      return '🧴';
-    case 'pediatrician':
-      return '🧒';
-    case 'gynecologist':
-      return '🌸';
-    case 'orthopedist':
-      return '🦴';
-    case 'psychiatrist':
-      return '🧘';
-    case 'endocrinologist':
-      return '⚖️';
-    case 'gastroenterologist':
-      return '🫃';
-    case 'general_physician':
-    default:
-      return '🩺';
-  }
-}
-
-function DoctorPicker({
-  doctors,
-  firstName,
-  onSelect,
-}: {
-  doctors: DoctorCard[];
-  firstName: string;
-  onSelect: (d: DoctorCard) => void;
-}) {
-  // Group by specialty so the directory reads like a real clinic listing.
-  const grouped = useMemo(() => {
-    const buckets = new Map<string, { name: string; doctors: DoctorCard[] }>();
-    for (const d of doctors) {
-      const key = d.specialty || 'unknown';
-      const label = d.specialty_name || d.specialty || 'General';
-      const bucket = buckets.get(key) || { name: label, doctors: [] };
-      bucket.doctors.push(d);
-      buckets.set(key, bucket);
-    }
-    return Array.from(buckets.entries())
-      .map(([key, b]) => ({ key, name: b.name, doctors: b.doctors }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [doctors]);
-
-  return (
-    <div
-      style={{
-        margin: 'auto',
-        maxWidth: 720,
-        width: '100%',
-        color: 'var(--text-secondary)',
-        lineHeight: 1.5,
-      }}
-    >
-      <div style={{ textAlign: 'center', fontSize: '1.6rem', marginBottom: 10 }}>👋</div>
-      <h2
-        style={{
-          textAlign: 'center',
-          fontSize: '1.25rem',
-          marginBottom: 8,
-          color: 'var(--text-primary)',
-        }}
-      >
-        Hi {firstName}, choose a doctor to start
-      </h2>
-      <p style={{ textAlign: 'center', fontSize: '0.9rem', marginBottom: 20 }}>
-        MediSense AI will stand in for the doctor you pick until they're ready
-        to take over the chat themselves.
-      </p>
-      {doctors.length === 0 ? (
-        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-          Loading doctors…
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {grouped.map((g) => (
-            <div key={g.key}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  color: TEAL,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.6px',
-                  marginBottom: 8,
-                  padding: '0 4px',
-                }}
-              >
-                <span>{specialistEmoji(g.key)}</span>
-                {g.name}
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                  gap: 10,
-                }}
-              >
-                {g.doctors.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => onSelect(d)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '12px 14px',
-                      background: 'rgba(15,30,60,0.55)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 12,
-                      cursor: 'pointer',
-                      color: 'var(--text-primary)',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = TEAL;
-                      e.currentTarget.style.background = 'rgba(5,174,187,0.10)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                      e.currentTarget.style.background = 'rgba(15,30,60,0.55)';
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
-                      {d.full_name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.74rem',
-                        color: 'var(--text-secondary)',
-                      }}
-                    >
-                      {d.specialty_name || d.specialty || 'General Physician'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ── Thinking Indicator ─────────────────────────────────────────── */
-
-const THINKING_STYLE_ID = 'medisense-thinking-keyframes';
 
 function ThinkingIndicator() {
   useEffect(() => {

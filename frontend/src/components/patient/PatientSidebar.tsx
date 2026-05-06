@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
-  { to: '/patient', label: 'Upload Report', icon: '🧾' },
-  { to: '/patient/chat', label: 'Chat with MediSense', icon: '💬' },
+  { to: '/patient', label: 'Dashboard', icon: '🧬' },
+  { to: '/patient/upload', label: 'Upload Report', icon: '🧾' },
+  { to: '/patient/chat', label: 'Consultations', icon: '💬' },
   { to: '/consultation/schedule', label: 'Schedule a Call', icon: '📅' },
 ];
 

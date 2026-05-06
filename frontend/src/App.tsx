@@ -12,6 +12,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import ChatbotWidget from './components/ChatbotWidget';
 import PatientChat from './pages/PatientChat';
+import PatientReportUpload from './pages/PatientReportUpload';
 import UseCasesPage from './pages/UseCasesPage';
 import FeaturesPage from './pages/FeaturesPage';
 import PricingPage from './pages/PricingPage';
@@ -1220,6 +1221,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['patient']}>
                 <PatientChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/patient/upload"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <PatientReportUpload />
               </ProtectedRoute>
             }
           />
