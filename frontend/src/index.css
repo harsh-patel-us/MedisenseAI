@@ -205,6 +205,91 @@ body {
   animation: pulse-dot 2s infinite;
 }
 
+/* ── Premium Full Page Loader ────────────────────────────────────────── */
+.full-page-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.8);
+  backdrop-filter: blur(15px);
+  animation: fade-in 0.3s ease-out;
+}
+
+.loader-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.loader-rings {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--brand-teal);
+  animation: spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+.loader-ring:nth-child(2) {
+  inset: 8px;
+  border-top-color: var(--brand-blue);
+  animation-duration: 1.8s;
+  animation-direction: reverse;
+}
+
+.loader-ring:nth-child(3) {
+  inset: 16px;
+  border-top-color: var(--brand-cyan);
+  animation-duration: 2.4s;
+}
+
+.loader-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.loader-text {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: var(--gradient-brand);
+  WebkitBackgroundClip: text;
+  WebkitTextFillColor: transparent;
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes pulse-glow {
+  0%, 100% { transform: scale(0.9); opacity: 0.7; filter: drop-shadow(0 0 0px var(--brand-teal)); }
+  50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 15px var(--brand-teal)); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* ── Navigation ──────────────────────────────────────────────────────── */
 .nav-blur {
   background: rgba(2, 6, 23, 0.8);
