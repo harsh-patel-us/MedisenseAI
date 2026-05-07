@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import DoctorDashboard from './pages/DoctorDashboard';
+import DoctorChat from './pages/DoctorChat';
 import PatientDashboard from './pages/PatientDashboard';
 import AboutPage from './pages/AboutPage';
 import ContactPage from './pages/ContactPage';
@@ -1205,6 +1206,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['doctor']}>
                 <DoctorDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/doctor/chat"
+            element={
+              <ProtectedRoute allowedRoles={['doctor']}>
+                <DoctorChat />
               </ProtectedRoute>
             }
           />

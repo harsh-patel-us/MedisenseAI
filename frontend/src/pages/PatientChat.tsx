@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getToken } from '../api/authApi';
 import {
@@ -75,27 +75,6 @@ function formatTime(iso: string): string {
   }
 }
 
-function dayBucket(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return 'Earlier';
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const ts = d.getTime();
-  const day = 24 * 60 * 60 * 1000;
-  if (ts >= startOfToday) return 'Today';
-  if (ts >= startOfToday - day) return 'Yesterday';
-  if (ts >= startOfToday - 7 * day) return 'Previous 7 days';
-  if (ts >= startOfToday - 30 * day) return 'Previous 30 days';
-  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function bucketOrder(b: string): number {
-  if (b === 'Today') return 0;
-  if (b === 'Yesterday') return 1;
-  if (b === 'Previous 7 days') return 2;
-  if (b === 'Previous 30 days') return 3;
-  return 4;
-}
 
 function specialistEmoji(specialty: string): string {
   const s = specialty.toLowerCase();
@@ -107,32 +86,6 @@ function specialistEmoji(specialty: string): string {
   if (s.includes('ortho')) return '🦴';
   if (s.includes('gastro')) return '🧪';
   return '🩺';
-}
-
-function shortSummary(s: PatientChatSessionSummary): string {
-  if (s.session_summary && s.session_summary.trim()) {
-    const t = s.session_summary.trim();
-    return t.length > 100 ? t.slice(0, 100) + '…' : t;
-  }
-  return s.message_count > 0 ? `${s.message_count} messages` : 'Consultation';
-}
-
-function sessionTitle(s: PatientChatSessionSummary): string {
-  // Prefer the explicit title (auto-set from the patient's first message), so
-  // brand-new conversations show what the patient actually asked about.
-  if (s.title && s.title.trim()) {
-    const t = s.title.trim();
-    return t.length > 48 ? t.slice(0, 48) + '…' : t;
-  }
-  if (s.session_summary && s.session_summary.trim()) {
-    const firstSentence = s.session_summary.split('.')[0].trim();
-    if (firstSentence.length >= 8) {
-      return firstSentence.length > 48
-        ? firstSentence.slice(0, 48) + '…'
-        : firstSentence;
-    }
-  }
-  return 'Consultation';
 }
 
 /* ── Components ─────────────────────────────────────────────────────── */
@@ -182,7 +135,6 @@ function BotAvatar({ size = 36 }: { size?: number }) {
 
 export default function PatientChat() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const patientId = user?.id ?? '';
 
@@ -192,7 +144,6 @@ export default function PatientChat() {
   const [input, setInput] = useState('');
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -263,8 +214,6 @@ export default function PatientChat() {
       console.error('Failed to load chat history', err);
       setError('Could not load your past conversations.');
       return [];
-    } finally {
-      setHistoryLoading(false);
     }
   }, [patientId]);
 
@@ -590,7 +539,6 @@ export default function PatientChat() {
     addFiles(e.dataTransfer.files);
   };
 
-  /* ── Keyboard ──────────────────────────────────────────────────── */
   /* ── Voice recording helpers ──────────────────────────────────── */
 
   const startVoiceRecording = useCallback(async () => {
@@ -627,7 +575,6 @@ export default function PatientChat() {
         }
 
         // Convert to base64 and send for transcription
-        setVoiceTranscribing(true);
         try {
           const reader = new FileReader();
           const b64 = await new Promise<string>((resolve, reject) => {
@@ -750,10 +697,7 @@ export default function PatientChat() {
               const filtered = prev.filter((m) => {
                 // If an assistant message arrived, drop the loading bubble.
                 if (m.pending && incoming.role === 'assistant') return false;
-                // If a user message arrived, keep the bubble (so it doesn't flicker).
-                if (m.pending && incoming.role === 'user') return true;
-
-                // Replace local optimistic user message with the real one.
+                // If a user message with the real one.
                 if (incoming.role === 'user' && m.id.startsWith('local-')) return false;
                 // Replace the manual REST reply with the real one from WS.
                 if (incoming.role === 'assistant' && m.id.startsWith('srv-')) return false;
@@ -804,16 +748,6 @@ export default function PatientChat() {
   };
 
   /* ── Grouped sessions for sidebar ──────────────────────────────── */
-  const groupedSessions = useMemo(() => {
-    const groups = new Map<string, PatientChatSessionSummary[]>();
-    for (const s of sessions) {
-      const b = dayBucket(s.started_at);
-      const arr = groups.get(b) ?? [];
-      arr.push(s);
-      groups.set(b, arr);
-    }
-    return Array.from(groups.entries()).sort((a, b) => bucketOrder(a[0]) - bucketOrder(b[0]));
-  }, [sessions]);
 
   /* ── Render ────────────────────────────────────────────────────── */
 
@@ -1399,9 +1333,6 @@ export default function PatientChat() {
       </main>
     </div>
   );
-
-  // unused — silences the navigate hook for future enhancements
-  void navigate;
 }
 
 /* ── Sub-components ─────────────────────────────────────────────── */

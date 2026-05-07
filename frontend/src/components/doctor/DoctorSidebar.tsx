@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useDoctorChat } from '../../contexts/DoctorChatContext';
 
 const TEAL = '#05aebb';
@@ -11,6 +11,7 @@ const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
 
 export default function DoctorSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(true);
   const { chatList, selectedChatId, setSelectedChatId, chatListLoading } = useDoctorChat();
 
@@ -142,7 +143,10 @@ export default function DoctorSidebar() {
             return (
               <button
                 key={chat.id}
-                onClick={() => setSelectedChatId(chat.id)}
+                onClick={() => {
+                  setSelectedChatId(chat.id);
+                  navigate('/doctor/chat');
+                }}
                 title={!expanded ? `Chat with ${chat.patient_name}` : undefined}
                 style={{
                   width: '100%',

@@ -141,7 +141,7 @@ export default function PatientReportUpload() {
         findings: detail.findings,
         conditions_suggested: [],
         critical_alerts: [],
-        plain_summary: detail.plain_summary || detail.summary || '',
+        plain_summary: detail.summary || '',
         what_this_means: '',
         specialists: detail.specialists,
         urgency: (detail.urgency as UrgencyLevel) || 'routine',
