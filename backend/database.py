@@ -91,6 +91,17 @@ class User(Base):
     # /doctor/active-chats to chats whose patient picked this specialty.
     specialty: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # ── Profile Information ──────────────────────────────────────────────
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Profile picture stored in-row for portability.
+    profile_pic_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    profile_pic_mime: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    # Common medical/personal fields
+    date_of_birth: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    gender: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     # ── Google Calendar OAuth ────────────────────────────────────────────
     # Populated when the user connects their Google account on the schedule
     # page. Used to insert calendar events (with Google Meet links) on their
@@ -435,6 +446,12 @@ async def init_db():
                 ("google_token_expiry", "TIMESTAMP"),
                 ("google_scopes", "TEXT"),
                 ("specialty", "VARCHAR"),
+                ("phone_number", "VARCHAR"),
+                ("bio", "TEXT"),
+                ("profile_pic_data", binary_type),
+                ("profile_pic_mime", "VARCHAR"),
+                ("date_of_birth", "TIMESTAMP"),
+                ("gender", "VARCHAR"),
             ],
         }
 

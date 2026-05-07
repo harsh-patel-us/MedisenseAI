@@ -83,6 +83,25 @@ export async function updateMySpecialty(specialty: string): Promise<AuthUser> {
   return data;
 }
 
+export async function updateProfile(body: Partial<AuthUser>): Promise<AuthUser> {
+  const { data } = await axios.put<AuthUser>(`${API_BASE}/auth/me/profile`, body);
+  return data;
+}
+
+export async function uploadProfilePic(file: File): Promise<AuthUser> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await axios.put<AuthUser>(`${API_BASE}/auth/me/profile-pic`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export function getProfilePicUrl(): string {
+  const token = getToken();
+  return `${API_BASE}/auth/me/profile-pic?token=${token}&t=${Date.now()}`;
+}
+
 export interface SpecialtyOption {
   id: string;
   name: string;

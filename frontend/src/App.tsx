@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import DoctorDashboard from './pages/DoctorDashboard';
@@ -9,6 +9,7 @@ import ContactPage from './pages/ContactPage';
 import SchedulePage from './pages/SchedulePage';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ProfilePage from './pages/ProfilePage';
 import ProtectedRoute from './components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import ChatbotWidget from './components/ChatbotWidget';
@@ -21,6 +22,7 @@ import SecurityPage from './pages/SecurityPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import ResourcesPage from './pages/ResourcesPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { getProfilePicUrl } from './api/authApi';
 import PatientLayout from './components/patient/PatientLayout';
 import DoctorLayout from './components/doctor/DoctorLayout';
 import './index.css';
@@ -31,6 +33,18 @@ function Navbar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Public visitors see marketing nav; logged-in users focus on their workspace.
   const navLinks = user
@@ -49,10 +63,12 @@ function Navbar() {
 
   const handleLogout = () => {
     logout();
+    setProfileOpen(false);
     navigate('/', { replace: true });
   };
 
   const dashboardPath = user?.role === 'patient' ? '/patient' : '/doctor';
+  const profilePath = user?.role === 'patient' ? '/patient/profile' : '/doctor/profile';
 
   return (
     <nav style={{
@@ -106,7 +122,7 @@ function Navbar() {
       </div>
 
       {/* Right-side portal buttons */}
-      <div className="nav-actions-desktop" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div className="nav-actions-desktop" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         {user ? (
           <>
             <Link to={dashboardPath}>
@@ -125,23 +141,81 @@ function Navbar() {
                 📅 Schedule
               </button>
             </Link>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '6px 12px', borderRadius: 8,
-              background: 'rgba(5,174,187,0.08)',
-              border: '1px solid rgba(5,174,187,0.25)',
-              fontSize: '0.8rem', color: 'var(--text-secondary)',
-            }}>
-              <span style={{ fontSize: '0.95rem' }}>{user.role === 'doctor' ? '🩺' : '🧬'}</span>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{user.full_name.split(' ')[0]}</span>
+            
+            {/* Profile Dropdown */}
+            <div style={{ position: 'relative' }} ref={profileRef}>
+              <button
+                onClick={() => setProfileOpen(!profileOpen)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 14px', borderRadius: 12,
+                  background: profileOpen ? 'rgba(5,174,187,0.15)' : 'rgba(5,174,187,0.08)',
+                  border: `1px solid ${profileOpen ? 'var(--brand-teal)' : 'rgba(5,174,187,0.25)'}`,
+                  fontSize: '0.85rem', color: 'var(--text-primary)',
+                  cursor: 'pointer', transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: 'var(--gradient-brand)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '1rem', flexShrink: 0,
+                  overflow: 'hidden',
+                }}>
+                  {user.has_profile_pic ? (
+                    <img src={getProfilePicUrl()} alt={user.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    user.role === 'doctor' ? '🩺' : '🧬'
+                  )}
+                </div>
+                <span style={{ fontWeight: 700 }}>{user.full_name.split(' ')[0]}</span>
+                <span style={{ fontSize: '0.7rem', opacity: 0.7, transform: profileOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+              </button>
+
+              {profileOpen && (
+                <div className="glass-card animate-float" style={{
+                  position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+                  width: 220, padding: 8, zIndex: 1000,
+                  boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+                  animation: 'demo-fade 0.2s ease-out',
+                }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.full_name}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{user.email}</div>
+                  </div>
+                  
+                  <Link to={profilePath} onClick={() => setProfileOpen(false)} style={{ textDecoration: 'none' }}>
+                    <button style={{
+                      width: '100%', padding: '10px 16px', borderRadius: 8,
+                      textAlign: 'left', background: 'transparent', border: 'none',
+                      color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 600,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(5,174,187,0.1)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                    >
+                      👤 View Profile
+                    </button>
+                  </Link>
+
+                  <button 
+                    onClick={handleLogout}
+                    style={{
+                      width: '100%', padding: '10px 16px', borderRadius: 8,
+                      textAlign: 'left', background: 'transparent', border: 'none',
+                      color: '#fca5a5', fontSize: '0.85rem', fontWeight: 600,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(220, 38, 38, 0.1)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                  >
+                    🚪 Logout
+                  </button>
+                </div>
+              )}
             </div>
-            <button
-              className="btn-secondary"
-              onClick={handleLogout}
-              style={{ padding: '8px 14px', fontSize: '0.82rem' }}
-            >
-              Logout
-            </button>
           </>
         ) : (
           <>
@@ -523,7 +597,7 @@ function FaqSection() {
 }
 
 /* ── Animated Counter ────────────────────────────────────────────────── */
-function AnimatedCounter({ end, suffix = '', duration = 1500 }: { end: number; suffix?: string; duration?: number }) {
+export function AnimatedCounter({ end, suffix = '', duration = 1500 }: { end: number; suffix?: string; duration?: number }) {
   const [value, setValue] = useState(0);
 
   useEffect(() => {
@@ -696,6 +770,9 @@ function LandingPage() {
            ))}
         </div>
       </section>
+
+      {/* ── FAQ ───────────────────────────────────────── */}
+      <FaqSection />
 
       {/* ── CTA ───────────────────────────────────────── */}
       <section style={{ padding: '120px 24px' }}>
@@ -904,6 +981,14 @@ export default function App() {
             }
           />
           <Route
+            path="/doctor/profile"
+            element={
+              <ProtectedRoute allowedRoles={['doctor']}>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/doctor/chat"
             element={
               <ProtectedRoute allowedRoles={['doctor']}>
@@ -916,6 +1001,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['patient']}>
                 <PatientDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/patient/profile"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />

@@ -6,6 +6,7 @@ const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
   { to: '/patient/upload', label: 'Upload Report', icon: '🧾' },
   { to: '/patient/chat', label: 'Consultations', icon: '💬' },
   { to: '/consultation/schedule', label: 'Schedule a Call', icon: '📅' },
+  { to: '/patient/profile', label: 'My Profile', icon: '👤' },
 ];
 
 export default function PatientSidebar() {

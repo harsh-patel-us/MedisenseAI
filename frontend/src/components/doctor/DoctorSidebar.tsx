@@ -7,6 +7,7 @@ const TEAL = '#05aebb';
 const SIDEBAR_LINKS: { to: string; label: string; icon: string }[] = [
   { to: '/doctor', label: 'Dashboard', icon: '🩺' },
   { to: '/consultation/schedule', label: 'Schedule a Call', icon: '📅' },
+  { to: '/doctor/profile', label: 'My Profile', icon: '👤' },
 ];
 
 export default function DoctorSidebar() {

@@ -7,7 +7,7 @@ GET  /auth/me        → current user info from bearer token
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,12 +18,14 @@ from models.auth_models import (
     RegisterRequest,
     UpdateSpecialtyRequest,
     UserPublic,
+    ProfileUpdateRequest,
 )
 from services.auth_service import (
     create_access_token,
     get_current_user,
     hash_password,
     verify_password,
+    decode_token,
 )
 from services.specialties import SPECIALTIES, SPECIALTY_IDS
 from utils.helpers import generate_id
@@ -40,6 +42,11 @@ def _to_public(user: User) -> UserPublic:
         role=user.role,  # type: ignore[arg-type]
         created_at=user.created_at,
         specialty=user.specialty,
+        phone_number=user.phone_number,
+        bio=user.bio,
+        date_of_birth=user.date_of_birth,
+        gender=user.gender,
+        has_profile_pic=user.profile_pic_data is not None,
     )
 
 
@@ -105,6 +112,71 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: User = Depends(get_current_user)):
+    return _to_public(user)
+
+
+@router.get("/me/profile-pic")
+async def get_profile_pic(token: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Return the raw profile picture bytes with correct MIME type."""
+    try:
+        payload = decode_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user or not user.profile_pic_data:
+        raise HTTPException(status_code=404, detail="No profile picture set")
+    return Response(content=user.profile_pic_data, media_type=user.profile_pic_mime or "image/jpeg")
+
+
+@router.put("/me/profile", response_model=UserPublic)
+async def update_profile(
+    body: ProfileUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update personal profile fields (name, phone, bio, DOB, gender)."""
+    if body.full_name is not None:
+        user.full_name = body.full_name
+    if body.phone_number is not None:
+        user.phone_number = body.phone_number
+    if body.bio is not None:
+        user.bio = body.bio
+    if body.date_of_birth is not None:
+        user.date_of_birth = body.date_of_birth
+    if body.gender is not None:
+        user.gender = body.gender
+
+    await db.commit()
+    await db.refresh(user)
+    return _to_public(user)
+
+
+@router.put("/me/profile-pic", response_model=UserPublic)
+async def update_profile_pic(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a new profile picture. Replaces existing one."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    # Read the bytes (limit to 2MB for in-db storage safety)
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be under 2MB")
+
+    user.profile_pic_data = content
+    user.profile_pic_mime = file.content_type
+
+    await db.commit()
+    await db.refresh(user)
     return _to_public(user)
 
 

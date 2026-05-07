@@ -33,6 +33,21 @@ class UserPublic(BaseModel):
     created_at: datetime
     # Doctors only — id of their medical specialty (one of services.specialties).
     specialty: str | None = None
+    
+    # Profile fields
+    phone_number: str | None = None
+    bio: str | None = None
+    date_of_birth: datetime | None = None
+    gender: str | None = None
+    has_profile_pic: bool = False
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    phone_number: str | None = Field(default=None, max_length=20)
+    bio: str | None = Field(default=None, max_length=1000)
+    date_of_birth: datetime | None = None
+    gender: str | None = None
 
 
 class AuthResponse(BaseModel):

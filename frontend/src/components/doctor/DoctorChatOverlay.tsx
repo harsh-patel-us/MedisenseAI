@@ -1,4 +1,3 @@
-import React from 'react';
 import DoctorChatView from './DoctorChatView';
 
 interface DoctorChatOverlayProps {

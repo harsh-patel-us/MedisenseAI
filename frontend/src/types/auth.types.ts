@@ -8,6 +8,13 @@ export interface AuthUser {
   created_at: string;
   /** Doctors only — id of the medical specialty they cover. */
   specialty?: string | null;
+  
+  // Profile fields
+  phone_number?: string | null;
+  bio?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  has_profile_pic?: boolean;
 }
 
 export interface AuthResponse {
