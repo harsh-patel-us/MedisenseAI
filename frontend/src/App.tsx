@@ -246,66 +246,60 @@ const demoContent: Record<DemoKey, {
   heading: string;
   intro: string;
   panelTitle: string;
-  lines: Array<{ label?: string; text: string; emphasis?: boolean }>;
+  lines: Array<{ label?: string; text: string; emphasis?: boolean; subtext?: string }>;
   cta: { to: string; label: string };
 }> = {
   doctor: {
-    label: 'Doctor',
+    label: 'Doctor Side',
     icon: '🩺',
-    color: '#22d3ee',
-    heading: 'Talk. We document.',
+    color: '#0d9488',
+    heading: 'Documentation at the Speed of Thought',
     intro:
-      'You consult normally. MediSense captures every word, tags each speaker, and drafts a SOAP note the moment the call ends.',
-    panelTitle: 'Live transcript · Room 4F-88C2',
+      'Focus on your patient, not your screen. MediSense captures the conversation, identifies medical entities, and drafts a structured SOAP note in seconds.',
+    panelTitle: 'Clinical Intelligence Engine v2.0',
     lines: [
-      { label: 'DOCTOR', text: 'How long have you had the chest pain?' },
-      { label: 'PATIENT', text: 'About three days now. It\'s sharp when I breathe in.' },
-      { label: 'DOCTOR', text: 'Any fever, cough, or recent travel?' },
-      { label: 'PATIENT', text: 'No fever. No travel.' },
-      { text: '— SOAP draft ready in 8s —', emphasis: true },
-      { label: 'AI SOAP', text: 'S: 34F · 3-day pleuritic chest pain. Denies fever, cough, travel.' },
-      { label: 'AI SOAP', text: 'A: Likely costochondritis; rule out PE if risk factors.' },
+      { label: 'TRANSCRIPT', text: 'Dr: Any family history of hypertension?', subtext: '00:14' },
+      { label: 'TRANSCRIPT', text: 'Pt: Yes, my father and older brother.', subtext: '00:18' },
+      { text: '→ Extracting Entities: [Hypertension], [Family History]', emphasis: true },
+      { label: 'SOAP DRAFT', text: 'S: Significant family history of HTN (father, brother).' },
+      { label: 'SOAP DRAFT', text: 'A: Screen for early-stage hypertension; baseline EKG.' },
     ],
-    cta: { to: '/doctor', label: 'Open Doctor Dashboard →' },
+    cta: { to: '/doctor', label: 'Try Doctor Workspace →' },
   },
   patient: {
-    label: 'Patient',
+    label: 'Patient Side',
     icon: '🧬',
-    color: '#4ade80',
-    heading: 'Upload a report. Get a plan.',
+    color: '#06b6d4',
+    heading: 'Your Health, Finally Explained',
     intro:
-      'Drop in any PDF or photo. We read it — even scanned — explain every finding in plain language, and build a personalised care plan.',
-    panelTitle: 'Health guide · Metabolic panel',
+      'Upload complex lab reports and get immediate, plain-language insights. No more Googling symptoms—just clear, personalized guidance.',
+    panelTitle: 'MediSense Health Lab · Analysis',
     lines: [
-      { text: 'HbA1c  7.4 %   (ref < 5.7)   HIGH', emphasis: true },
-      { text: 'Fasting glucose  148 mg/dL   HIGH', emphasis: true },
-      { text: 'LDL cholesterol  118 mg/dL   BORDERLINE' },
-      { text: '— AI explanation —', emphasis: true },
-      { label: 'Plain', text: 'Your blood sugar is running high — suggests early type-2 diabetes.' },
-      { label: 'Plan', text: 'Diet: leafy greens, legumes, fatty fish 2×/week. Avoid refined sugar.' },
-      { label: 'Plan', text: 'Move: brisk walk 30 min/day, resistance 2×/week.' },
-      { label: 'Refer', text: 'Endocrinologist — within 1 week.' },
+      { text: 'Creatinine: 1.4 mg/dL (Ref: 0.7-1.3) HIGH', emphasis: true },
+      { text: 'eGFR: 58 mL/min/1.73m² (Ref: >60) LOW', emphasis: true },
+      { text: '→ AI Interpretation: Mild renal impairment detected.', emphasis: true },
+      { label: 'GUIDE', text: 'Your kidney markers are slightly high. This needs a follow-up.' },
+      { label: 'PLAN', text: 'Diet: Reduce sodium <1500mg. Increase water to 2L/day.' },
+      { label: 'REFER', text: 'Recommended specialist: Nephrologist.' },
     ],
-    cta: { to: '/patient', label: 'Open Patient Dashboard →' },
+    cta: { to: '/patient', label: 'Try Patient Portal →' },
   },
   video: {
-    label: 'Video Call',
+    label: 'Video Consults',
     icon: '🎥',
-    color: '#a78bfa',
-    heading: 'Schedule. Meet. Done.',
+    color: '#1e40af',
+    heading: 'Seamless Virtual Care',
     intro:
-      'Schedule a consultation and we drop a Google Meet link into both calendars. After the call, process the Meet transcript into a SOAP note from your dashboard in one click.',
-    panelTitle: 'Google Meet · scheduled consult',
+      'Integrated Google Meet scheduling with automated post-call processing. Every virtual visit becomes a permanent, searchable clinical record.',
+    panelTitle: 'Meet Integration · Active Stream',
     lines: [
-      { text: '→ Calendar invite sent to patient@example.com' },
-      { text: '→ Doctor opens Meet link (00:00)' },
-      { text: '→ Patient joins (00:04) · Meet captions on' },
-      { text: '— Call ended 12:34 —', emphasis: true },
-      { label: 'Process', text: 'Meet transcript → diarize → NER → SOAP draft.' },
-      { label: 'Saved', text: 'SOAP draft · Transcript · Session PDF' },
-      { label: 'Next', text: 'Doctor reviews → 1-click export to chart.' },
+      { text: '→ Booking: Wed Oct 14 @ 10:00 AM' },
+      { text: '→ Google Meet link synced to both calendars' },
+      { text: '→ Post-Call: Transcript automatically fetched', emphasis: true },
+      { label: 'RESULT', text: 'SOAP draft generated from Meet transcript.' },
+      { label: 'STATUS', text: 'PDF Health Guide sent to patient portal.' },
     ],
-    cta: { to: '/consultation/schedule', label: 'Schedule a Call →' },
+    cta: { to: '/consultation/schedule', label: 'Schedule Demo Call →' },
   },
 };
 
@@ -322,144 +316,105 @@ function InteractiveDemo() {
       i += 1;
       setVisibleLines(i);
       if (i >= total) window.clearInterval(timer);
-    }, 420);
+    }, 500);
     return () => window.clearInterval(timer);
   }, [tab, demo.lines.length]);
 
   return (
-    <section style={{
-      padding: '80px 24px',
-      borderTop: '1px solid var(--border-subtle)',
-      background: 'rgba(6,13,27,0.3)',
-    }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            display: 'inline-block', padding: '6px 14px', borderRadius: 20,
-            background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
-            fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
-            textTransform: 'uppercase', letterSpacing: '0.5px',
-          }}>
-            Live Demo
-          </div>
-          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 14 }}>
-            See it do the thing.
+    <section style={{ padding: '100px 24px', background: 'var(--surface-0)' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 60 }}>
+          <span className="live-indicator" style={{ marginRight: 8 }} />
+          <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--brand-teal)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            Interactive Demo
+          </span>
+          <h2 style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 900, marginTop: 16 }}>
+            The Platform in Action
           </h2>
-          <p style={{ color: 'var(--text-secondary)', maxWidth: 620, margin: '0 auto', lineHeight: 1.6 }}>
-            Pick a workflow — the panel on the right plays a simulated sample of what MediSense actually outputs.
-          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 24 }}>
-          {(Object.keys(demoContent) as DemoKey[]).map(k => {
-            const d = demoContent[k];
-            const active = tab === k;
-            return (
-              <button
-                key={k}
-                onClick={() => setTab(k)}
-                style={{
-                  padding: '10px 20px', borderRadius: 10,
-                  border: `1px solid ${active ? d.color : 'var(--border-subtle)'}`,
-                  background: active ? `${d.color}18` : 'rgba(15,30,60,0.4)',
-                  color: active ? d.color : 'var(--text-secondary)',
-                  fontSize: '0.9rem', fontWeight: 700,
-                  cursor: 'pointer', transition: 'all 0.2s',
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                }}
-              >
-                <span>{d.icon}</span>
-                {d.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="glass-card" style={{
-          padding: 0, overflow: 'hidden',
-          border: `1px solid ${demo.color}30`,
-        }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          }}>
-            <div style={{ padding: '36px 32px', borderRight: '1px solid var(--border-subtle)' }}>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '4px 10px', borderRadius: 6,
-                background: `${demo.color}1f`, color: demo.color,
-                border: `1px solid ${demo.color}40`,
-                fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.5px',
-                textTransform: 'uppercase', marginBottom: 16,
-              }}>
-                <span>{demo.icon}</span>
-                {demo.label} workflow
-              </div>
-              <h3 style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: 14, lineHeight: 1.3 }}>
-                {demo.heading}
-              </h3>
-              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, fontSize: '0.92rem', marginBottom: 24 }}>
-                {demo.intro}
-              </p>
-              <Link to={demo.cta.to}>
-                <button className="btn-primary" style={{
-                  padding: '12px 22px', fontSize: '0.9rem',
-                  background: `linear-gradient(135deg, ${demo.color} 0%, ${demo.color}cc 100%)`,
-                }}>
-                  {demo.cta.label}
-                </button>
-              </Link>
-            </div>
-
-            <div style={{
-              padding: '24px 26px',
-              background: 'rgba(6,13,27,0.7)',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              minHeight: 320,
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.5px',
-                color: demo.color, textTransform: 'uppercase', marginBottom: 18,
-              }}>
-                <span style={{
-                  width: 8, height: 8, background: demo.color, borderRadius: '50%',
-                  boxShadow: `0 0 10px ${demo.color}`, animation: 'pulse-dot 1.4s infinite',
-                }} />
-                {demo.panelTitle}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {demo.lines.slice(0, visibleLines).map((line, i) => (
-                  <div
-                    key={`${tab}-${i}`}
+        <div className="glass-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', padding: 0 }}>
+          {/* Controls */}
+          <div style={{ padding: 40, borderRight: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
+              {(Object.keys(demoContent) as DemoKey[]).map(k => {
+                const d = demoContent[k];
+                const active = tab === k;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => setTab(k)}
                     style={{
-                      fontSize: '0.82rem',
-                      lineHeight: 1.6,
-                      color: line.emphasis ? demo.color : 'var(--text-primary)',
-                      opacity: 0,
-                      animation: 'demo-fade 0.35s ease-out forwards',
-                      fontWeight: line.emphasis ? 700 : 400,
+                      padding: '20px', borderRadius: 16, textAlign: 'left',
+                      background: active ? 'rgba(13, 148, 136, 0.1)' : 'transparent',
+                      border: `1px solid ${active ? 'var(--brand-teal)' : 'transparent'}`,
+                      cursor: 'pointer', transition: 'all 0.3s ease',
                     }}
                   >
-                    {line.label && (
-                      <span style={{
-                        color: demo.color, fontWeight: 700, marginRight: 8,
-                        fontSize: '0.72rem', letterSpacing: '0.4px',
-                      }}>
-                        [{line.label}]
-                      </span>
-                    )}
-                    {line.text}
-                  </div>
-                ))}
-                {visibleLines < demo.lines.length && (
-                  <div style={{
-                    display: 'inline-block', width: 8, height: 14, background: demo.color,
-                    animation: 'demo-cursor 0.8s infinite',
-                  }} />
-                )}
-              </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+                      <span style={{ fontSize: '1.5rem', opacity: active ? 1 : 0.5 }}>{d.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 800, color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{d.label}</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{active ? 'Active Flow' : 'View Workflow'}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+
+            <div style={{ animation: 'demo-fade 0.5s ease-out' }}>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: 15 }}>{demo.heading}</h3>
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 30 }}>{demo.intro}</p>
+              <Link to={demo.cta.to}>
+                <button className="btn-primary" style={{ background: demo.color }}>{demo.cta.label}</button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Visualization */}
+          <div style={{ padding: 40, background: 'rgba(2, 6, 23, 0.5)', position: 'relative' }}>
+             <div className="demo-window">
+                <div className="demo-header">
+                   <div className="dot red" />
+                   <div className="dot yellow" />
+                   <div className="dot green" />
+                   <div style={{ marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>{demo.panelTitle}</div>
+                </div>
+                <div style={{ padding: 30, display: 'flex', flexDirection: 'column', gap: 15, minHeight: 350 }}>
+                   {demo.lines.slice(0, visibleLines).map((line, i) => (
+                     <div key={i} style={{ 
+                        animation: 'demo-fade 0.4s ease-out forwards',
+                        padding: '12px 16px',
+                        background: line.emphasis ? `${demo.color}15` : 'rgba(255,255,255,0.03)',
+                        borderRadius: 12,
+                        borderLeft: `3px solid ${line.emphasis ? demo.color : 'transparent'}`,
+                      }}>
+                        {line.label && (
+                          <div style={{ fontSize: '0.65rem', fontWeight: 900, color: demo.color, marginBottom: 4, textTransform: 'uppercase' }}>
+                            {line.label} {line.subtext && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{line.subtext}</span>}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '0.9rem', color: line.emphasis ? demo.color : 'var(--text-primary)', fontWeight: line.emphasis ? 700 : 400 }}>
+                          {line.text}
+                        </div>
+                     </div>
+                   ))}
+                   {visibleLines < demo.lines.length && (
+                      <div style={{ padding: '0 16px' }}>
+                        <div style={{ width: 10, height: 18, background: demo.color, animation: 'demo-cursor 0.8s infinite' }} />
+                      </div>
+                   )}
+                </div>
+             </div>
+             
+             {/* Floating decorative cards */}
+             <div className="glass-card animate-float" style={{ 
+                position: 'absolute', bottom: 20, right: 20, padding: '15px 20px', 
+                fontSize: '0.75rem', fontWeight: 800, background: 'var(--gradient-brand)', color: 'white' 
+              }}>
+               Processing Complete ✓
+             </div>
           </div>
         </div>
       </div>
@@ -594,280 +549,130 @@ function LandingPage() {
 
       {/* ── HERO ───────────────────────────────────────── */}
       <section style={{
-        padding: '80px 24px 100px',
-        position: 'relative',
+        padding: '120px 24px 140px',
         textAlign: 'center',
-        overflow: 'hidden',
+        position: 'relative',
       }}>
-        <div style={{ maxWidth: 900, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+        <div style={{ maxWidth: 1000, margin: '0 auto' }}>
           <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 10,
-            padding: '6px 18px', borderRadius: 20,
-            border: '1px solid rgba(5,174,187,0.3)',
-            background: 'rgba(5,174,187,0.08)',
-            fontSize: '0.8rem', fontWeight: 700, color: 'var(--brand-teal)',
-            marginBottom: 28, textTransform: 'uppercase', letterSpacing: '0.6px',
+            display: 'inline-flex', alignItems: 'center', gap: 12,
+            padding: '8px 20px', borderRadius: 99,
+            background: 'rgba(13, 148, 136, 0.1)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.85rem', fontWeight: 800, color: 'var(--brand-teal)',
+            marginBottom: 32,
           }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%', background: 'var(--brand-teal)',
-              boxShadow: '0 0 10px var(--brand-teal)', animation: 'pulse-dot 1.6s infinite',
-            }} />
-            Trusted by 5,000+ Clinicians Worldwide
+            <span className="live-indicator" />
+            Empowering 500+ Healthcare Providers in 2026
           </div>
 
           <h1 style={{
-            fontSize: 'clamp(2.2rem, 6vw, 4rem)',
-            fontWeight: 900, lineHeight: 1.1, marginBottom: 24,
+            fontSize: 'clamp(2.5rem, 8vw, 5rem)',
+            fontWeight: 950, lineHeight: 1, letterSpacing: '-2px',
+            marginBottom: 30,
           }}>
-            AI-Powered Medical Intelligence for{' '}
+            AI Intelligence for the{' '}
             <span style={{
               background: 'var(--gradient-brand)', WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
             }}>
-              Modern Clinicians
-            </span>
+              Next Generation
+            </span>{' '}
+            of Care
           </h1>
 
           <p style={{
-            fontSize: 'clamp(1rem, 1.6vw, 1.2rem)',
-            color: 'var(--text-secondary)', lineHeight: 1.7,
-            maxWidth: 680, margin: '0 auto 40px',
+            fontSize: 'clamp(1.1rem, 2vw, 1.35rem)',
+            color: 'var(--text-secondary)', lineHeight: 1.6,
+            maxWidth: 750, margin: '0 auto 45px',
           }}>
-            From real-time video consultations with automatic SOAP notes, to patient-friendly lab report analysis —
-            MediSense AI is the clinical co-pilot that gives doctors their time back and patients clearer care.
+            MediSense AI bridges the clinical documentation gap. From automated SOAP notes to personalized patient health guides, we build tools that make healthcare human again.
           </p>
 
-          <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 64 }}>
-            <Link to="/doctor"><button className="btn-primary" style={{ padding: '14px 32px', fontSize: '1rem' }}>🩺 I'm a Doctor</button></Link>
-            <Link to="/patient"><button className="btn-secondary" style={{ padding: '14px 32px', fontSize: '1rem' }}>🧬 I'm a Patient</button></Link>
-            <Link to="/consultation/schedule"><button className="btn-secondary" style={{ padding: '14px 32px', fontSize: '1rem' }}>📅 Schedule Video Call</button></Link>
+          <div style={{ display: 'flex', gap: 20, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 80 }}>
+            <Link to="/doctor"><button className="btn-primary">🩺 For Clinicians</button></Link>
+            <Link to="/patient"><button className="btn-secondary">🧬 For Patients</button></Link>
           </div>
 
-          {/* Trust bar */}
-          <div style={{
-            display: 'flex', gap: 36, justifyContent: 'center', flexWrap: 'wrap',
-            padding: '20px 24px', borderTop: '1px solid var(--border-subtle)',
-            maxWidth: 700, margin: '0 auto',
+          {/* Interactive Dash Preview */}
+          <div className="glass-card animate-float" style={{ 
+            maxWidth: 850, margin: '0 auto', padding: 0, 
+            boxShadow: '0 40px 100px -20px rgba(0,0,0,0.8)',
+            border: '1px solid rgba(13, 148, 136, 0.2)'
           }}>
-            {[
-              { icon: '🔒', label: 'HIPAA Aligned' },
-              { icon: '🛡️', label: 'End-to-End Encrypted' },
-              { icon: '⚡', label: 'Real-Time AI' },
-              { icon: '🌐', label: '30+ Countries' },
-            ].map(item => (
-              <div key={item.label} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600,
-              }}>
-                <span style={{ fontSize: '1rem' }}>{item.icon}</span>
-                {item.label}
-              </div>
-            ))}
+            <div style={{ height: 45, background: '#1e293b', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 8 }}>
+               <div className="dot red" /> <div className="dot yellow" /> <div className="dot green" />
+               <div style={{ marginLeft: 'auto', fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)' }}>medisense.ai/dashboard</div>
+            </div>
+            <div style={{ padding: 40, background: '#0f172a', display: 'grid', gridTemplateColumns: '200px 1fr', gap: 30 }}>
+               <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+                  {[1, 2, 3, 4].map(i => <div key={i} style={{ height: 12, background: 'rgba(255,255,255,0.05)', borderRadius: 4, width: i === 1 ? '80%' : '100%' }} />)}
+               </div>
+               <div style={{ textAlign: 'left' }}>
+                  <div style={{ height: 24, width: '40%', background: 'var(--gradient-brand)', borderRadius: 6, marginBottom: 20 }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 15 }}>
+                     <div style={{ height: 120, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }} />
+                     <div style={{ height: 120, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }} />
+                  </div>
+               </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── STATS ──────────────────────────────────────── */}
-      <section style={{
-        padding: '56px 24px',
-        borderTop: '1px solid var(--border-subtle)',
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'rgba(23,89,176,0.04)',
-      }}>
-        <div style={{
-          maxWidth: 1100, margin: '0 auto',
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 24,
-        }}>
-          {[
-            { num: 500000, suffix: '+', label: 'Consultations Assisted' },
-            { num: 5000, suffix: '+', label: 'Healthcare Providers' },
-            { num: 95, suffix: '%', label: 'Transcription Accuracy' },
-            { num: 70, suffix: '%', label: 'Less Paperwork Time' },
-          ].map(stat => (
-            <div key={stat.label} style={{ textAlign: 'center' }}>
-              <div style={{
-                fontSize: 'clamp(2rem, 3.5vw, 2.8rem)', fontWeight: 900,
-                background: 'var(--gradient-brand)', WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent', marginBottom: 6, lineHeight: 1,
-              }}>
-                <AnimatedCounter end={stat.num} suffix={stat.suffix} />
-              </div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', fontWeight: 600 }}>
-                {stat.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── FEATURES ───────────────────────────────────── */}
-      <section style={{ padding: '80px 24px' }}>
+      {/* ── BENTO FEATURES ────────────────────────────── */}
+      <section style={{ padding: '100px 24px', background: 'rgba(13, 148, 136, 0.02)' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', maxWidth: 640, margin: '0 auto 56px' }}>
-            <div style={{
-              display: 'inline-block', padding: '6px 14px', borderRadius: 20,
-              background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
-              fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
-              textTransform: 'uppercase', letterSpacing: '0.5px',
-            }}>
-              Platform Features
-            </div>
-            <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 16 }}>
-              Everything You Need, Beautifully Integrated
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.7 }}>
-              Purpose-built tools for every step of the care journey — from first consult to follow-up.
-            </p>
+          <div style={{ textAlign: 'center', marginBottom: 60 }}>
+            <h2 style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 900 }}>Powerfully Integrated</h2>
+            <p style={{ color: 'var(--text-secondary)', marginTop: 10 }}>Tools designed to work together, so you don't have to.</p>
           </div>
 
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24,
-          }}>
-            {[
-              { icon: '🎥', title: 'Live Video Consultations', desc: 'Schedule consultations with auto-generated Google Meet links and calendar invites for both parties.', color: '#22d3ee' },
-              { icon: '🎤', title: 'Real-Time Transcription', desc: 'Every word captured and speaker-labeled as the conversation happens. No manual notes required.', color: '#60a5fa' },
-              { icon: '📋', title: 'AI-Generated SOAP Notes', desc: 'Structured clinical notes produced automatically at end of call — editable, exportable, chart-ready.', color: '#a78bfa' },
-              { icon: '🧪', title: 'Lab Report Analysis', desc: 'Patients upload PDFs and get plain-English explanations, flagged abnormalities, and next steps.', color: '#4ade80' },
-              { icon: '🥗', title: 'Personalized Health Plans', desc: 'AI-generated diet, exercise, and precaution guides tailored to each patient\'s lab findings.', color: '#fbbf24' },
-              { icon: '📥', title: 'One-Click PDF Export', desc: 'Download professionally formatted clinical documents for records, referrals, or patient handouts.', color: '#f87171' },
-            ].map(f => (
-              <div key={f.title} className="glass-card" style={{ padding: '32px 28px' }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 14,
-                  background: `${f.color}18`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '1.7rem', marginBottom: 18,
-                  border: `1px solid ${f.color}40`,
-                }}>
-                  {f.icon}
-                </div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 10 }}>{f.title}</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>{f.desc}</p>
+          <div className="bento-grid">
+            <div className="glass-card" style={{ gridColumn: 'span 2', gridRow: 'span 2', padding: 40 }}>
+              <div className="feature-icon-wrapper">🎤</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: 15 }}>AI Clinical Scribe</h3>
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                Proprietary medical-grade transcription that understands clinical context. It doesn't just record—it synthesizes conversations into structured data.
+              </p>
+              <div style={{ marginTop: 30, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {['98% Accuracy', 'HIPAA Secure', 'Real-time Diarization'].map(t => (
+                  <span key={t} style={{ fontSize: '0.7rem', fontWeight: 800, padding: '6px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }}>{t}</span>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── HOW IT WORKS ──────────────────────────────── */}
-      <section style={{
-        padding: '80px 24px',
-        borderTop: '1px solid var(--border-subtle)',
-        background: 'rgba(23,89,176,0.03)',
-      }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', maxWidth: 640, margin: '0 auto 56px' }}>
-            <div style={{
-              display: 'inline-block', padding: '6px 14px', borderRadius: 20,
-              background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
-              fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
-              textTransform: 'uppercase', letterSpacing: '0.5px',
-            }}>
-              How It Works
             </div>
-            <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 16 }}>
-              Two Workflows, One Platform
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.7 }}>
-              Whether you're the clinician or the patient — we've designed a frictionless experience.
-            </p>
-          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 32 }}>
-
-            {/* Doctor Flow */}
-            <div className="glass-card" style={{ padding: '36px 32px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28 }}>
-                <div style={{
-                  width: 48, height: 48, borderRadius: 12,
-                  background: 'var(--gradient-brand)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '1.6rem', boxShadow: '0 6px 20px rgba(23,89,176,0.3)',
-                }}>🩺</div>
+            <div className="glass-card" style={{ gridColumn: 'span 2', padding: 30 }}>
+              <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+                <div className="feature-icon-wrapper" style={{ marginBottom: 0 }}>📋</div>
                 <div>
-                  <h3 style={{ fontWeight: 800, fontSize: '1.2rem' }}>For Doctors</h3>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--brand-teal)', fontWeight: 600 }}>
-                    Consultation → SOAP Note
-                  </div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 900 }}>Automated SOAP Notes</h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Generate chart-ready clinical notes in one click.</p>
                 </div>
               </div>
-
-              {[
-                { n: 1, t: 'Start a Session', d: 'Open the Doctor Dashboard and begin recording, or schedule a Google Meet consultation.' },
-                { n: 2, t: 'Talk Naturally', d: 'Conduct the consultation as you normally would. AI transcribes and labels every speaker in real time.' },
-                { n: 3, t: 'Review AI SOAP Note', d: 'End the call to receive structured Subjective, Objective, Assessment, and Plan — edit as needed.' },
-                { n: 4, t: 'Export & Share', d: 'Download a chart-ready PDF or copy to clipboard for your EHR system.' },
-              ].map(step => (
-                <div key={step.n} style={{ display: 'flex', gap: 18, marginBottom: 20 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                    background: 'rgba(23,89,176,0.15)', color: 'var(--brand-teal)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: '0.9rem',
-                    border: '1px solid rgba(5,174,187,0.3)',
-                  }}>{step.n}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: '0.95rem' }}>{step.t}</div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.6 }}>{step.d}</div>
-                  </div>
-                </div>
-              ))}
-
-              <Link to="/doctor">
-                <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}>
-                  Open Doctor Dashboard →
-                </button>
-              </Link>
             </div>
 
-            {/* Patient Flow */}
-            <div className="glass-card" style={{ padding: '36px 32px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28 }}>
-                <div style={{
-                  width: 48, height: 48, borderRadius: 12,
-                  background: 'linear-gradient(135deg, #05aebb 0%, #4ade80 100%)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '1.6rem', boxShadow: '0 6px 20px rgba(5,174,187,0.3)',
-                }}>🧬</div>
-                <div>
-                  <h3 style={{ fontWeight: 800, fontSize: '1.2rem' }}>For Patients</h3>
-                  <div style={{ fontSize: '0.8rem', color: '#4ade80', fontWeight: 600 }}>
-                    Lab Report → Health Guide
-                  </div>
-                </div>
-              </div>
-
-              {[
-                { n: 1, t: 'Upload Your Report', d: 'Drop in any PDF lab report. We extract the text even from scanned documents via OCR.' },
-                { n: 2, t: 'AI Analysis', d: 'Our medical AI interprets findings in plain language and flags values that need attention.' },
-                { n: 3, t: 'Get Your Plan', d: 'Receive a personalized guide: diet recommendations, exercise, precautions, and specialist referrals.' },
-                { n: 4, t: 'Download & Discuss', d: 'Save a PDF to review with your doctor. You come in prepared and informed.' },
-              ].map(step => (
-                <div key={step.n} style={{ display: 'flex', gap: 18, marginBottom: 20 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                    background: 'rgba(33,162,87,0.15)', color: '#4ade80',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: '0.9rem',
-                    border: '1px solid rgba(33,162,87,0.3)',
-                  }}>{step.n}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: '0.95rem' }}>{step.t}</div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.6 }}>{step.d}</div>
-                  </div>
-                </div>
-              ))}
-
-              <Link to="/patient">
-                <button className="btn-primary" style={{
-                  width: '100%', justifyContent: 'center', marginTop: 12,
-                  background: 'linear-gradient(135deg, #05aebb 0%, #4ade80 100%)',
-                }}>
-                  Open Patient Dashboard →
-                </button>
-              </Link>
+            <div className="glass-card" style={{ padding: 30 }}>
+               <div className="feature-icon-wrapper" style={{ width: 40, height: 40, fontSize: '1.2rem' }}>🧪</div>
+               <h4 style={{ fontWeight: 800, marginTop: 15 }}>Lab Analysis</h4>
+               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 5 }}>OCR-powered report interpretation.</p>
             </div>
 
+            <div className="glass-card" style={{ padding: 30 }}>
+               <div className="feature-icon-wrapper" style={{ width: 40, height: 40, fontSize: '1.2rem' }}>🥗</div>
+               <h4 style={{ fontWeight: 800, marginTop: 15 }}>Health Plans</h4>
+               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 5 }}>AI-personalized diet & exercise.</p>
+            </div>
+
+            <div className="glass-card" style={{ gridColumn: 'span 2', padding: 30, background: 'var(--gradient-brand)' }}>
+               <div style={{ color: 'white' }}>
+                  <h3 style={{ fontSize: '1.5rem', fontWeight: 900 }}>Secure & Private</h3>
+                  <p style={{ opacity: 0.9 }}>Military-grade encryption for all health data.</p>
+               </div>
+               <button className="btn-primary" style={{ background: 'rgba(255,255,255,0.2)', boxShadow: 'none', border: '1px solid rgba(255,255,255,0.3)', marginTop: 20 }}>
+                 Learn about Security center
+               </button>
+            </div>
           </div>
         </div>
       </section>
@@ -875,149 +680,38 @@ function LandingPage() {
       {/* ── INTERACTIVE DEMO ──────────────────────────── */}
       <InteractiveDemo />
 
-      {/* ── WHY CHOOSE US ─────────────────────────────── */}
-      <section style={{ padding: '80px 24px' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 32, alignItems: 'center' }}>
-            <div>
-              <div style={{
-                display: 'inline-block', padding: '6px 14px', borderRadius: 20,
-                background: 'rgba(5,174,187,0.08)', color: 'var(--brand-teal)',
-                fontSize: '0.75rem', fontWeight: 700, marginBottom: 18,
-                textTransform: 'uppercase', letterSpacing: '0.5px',
-              }}>
-                Why MediSense
-              </div>
-              <h2 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.4rem)', fontWeight: 800, marginBottom: 18, lineHeight: 1.2 }}>
-                Built by doctors, for doctors. Trusted by patients.
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.8, marginBottom: 24 }}>
-                Most AI tools are built by engineers guessing at clinical workflows.
-                MediSense is co-designed with practicing physicians and validated against
-                evidence-based medicine — so the output feels like a thoughtful colleague,
-                not a generic chatbot.
-              </p>
-              <Link to="/about">
-                <button className="btn-secondary">Learn Our Story →</button>
-              </Link>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {[
-                { icon: '✅', t: 'Clinician-in-the-loop', d: 'Every AI output is editable. The doctor always has final say.' },
-                { icon: '⚡', t: 'Fast enough for live calls', d: 'Sub-second transcription so documentation never lags behind conversation.' },
-                { icon: '🔐', t: 'Privacy by design', d: 'Encryption in transit and at rest. Session data auto-purged on close.' },
-                { icon: '📚', t: 'Evidence-based outputs', d: 'Models grounded in peer-reviewed clinical literature, not Wikipedia.' },
-              ].map(item => (
-                <div key={item.t} style={{
-                  display: 'flex', gap: 16, padding: '16px 18px',
-                  background: 'rgba(15,30,60,0.4)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 12,
-                }}>
-                  <div style={{ fontSize: '1.4rem', flexShrink: 0 }}>{item.icon}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 3, fontSize: '0.92rem' }}>{item.t}</div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.5 }}>{item.d}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* ── STATS BAR ─────────────────────────────────── */}
+      <section style={{ padding: '60px 24px', borderTop: '1px solid var(--border-subtle)', background: 'rgba(2, 6, 23, 0.5)' }}>
+        <div style={{ maxWidth: 1000, margin: '0 auto', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 40 }}>
+           {[
+             { val: '250K+', label: 'Notes Generated' },
+             { val: '99.9%', label: 'Platform Uptime' },
+             { val: '15min', label: 'Average Time Saved' },
+             { val: '30+', label: 'Specialties Supported' }
+           ].map(s => (
+             <div key={s.label} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: 950, color: 'var(--brand-teal)' }}>{s.val}</div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{s.label}</div>
+             </div>
+           ))}
         </div>
       </section>
-
-      {/* ── TESTIMONIALS ──────────────────────────────── */}
-      <section style={{
-        padding: '80px 24px',
-        borderTop: '1px solid var(--border-subtle)',
-        background: 'rgba(23,89,176,0.03)',
-      }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, marginBottom: 12 }}>
-              What Our Users Say
-            </h2>
-            <p style={{ color: 'var(--text-secondary)' }}>
-              Real feedback from clinicians and patients around the world.
-            </p>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
-            {[
-              {
-                quote: 'I used to spend 2 hours after clinic on notes. Now it\'s 15 minutes of review. MediSense gave me my evenings back.',
-                name: 'Dr. Rachel Kim',
-                role: 'Family Medicine, Seattle',
-                icon: '👩‍⚕️',
-              },
-              {
-                quote: 'My father got his lab report back and actually understood it for the first time. The personalized diet plan was a game-changer.',
-                name: 'Sameer Khan',
-                role: 'Patient, Dubai',
-                icon: '🧑',
-              },
-              {
-                quote: 'The transcription accuracy on medical terminology is remarkable. It correctly captures drug names, dosages, and ICD codes.',
-                name: 'Dr. James O\'Brien',
-                role: 'Internal Medicine, Dublin',
-                icon: '👨‍⚕️',
-              },
-            ].map(t => (
-              <div key={t.name} className="glass-card" style={{ padding: '28px 26px' }}>
-                <div style={{ fontSize: '1.8rem', color: 'var(--brand-teal)', marginBottom: 10, lineHeight: 1 }}>
-                  "
-                </div>
-                <p style={{ fontSize: '0.92rem', lineHeight: 1.7, color: 'var(--text-primary)', marginBottom: 20 }}>
-                  {t.quote}
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: '50%',
-                    background: 'var(--gradient-brand)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '1.2rem',
-                  }}>{t.icon}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>{t.name}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{t.role}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── FAQ ───────────────────────────────────────── */}
-      <FaqSection />
 
       {/* ── CTA ───────────────────────────────────────── */}
-      <section style={{ padding: '80px 24px' }}>
-        <div className="glass-card" style={{
-          maxWidth: 1000, margin: '0 auto',
-          padding: 'clamp(40px, 6vw, 64px)',
-          textAlign: 'center',
-          background: 'linear-gradient(135deg, rgba(23,89,176,0.15) 0%, rgba(5,174,187,0.12) 100%)',
-          border: '1px solid rgba(5,174,187,0.25)',
+      <section style={{ padding: '120px 24px' }}>
+        <div className="glass-card" style={{ 
+          maxWidth: 1000, margin: '0 auto', padding: '80px 40px', textAlign: 'center',
+          background: 'radial-gradient(circle at center, rgba(13, 148, 136, 0.1) 0%, transparent 70%)'
         }}>
-          <h2 style={{
-            fontSize: 'clamp(1.6rem, 3.5vw, 2.4rem)', fontWeight: 800, marginBottom: 16,
-            background: 'var(--gradient-brand)', WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}>
-            Ready to Experience Smarter Healthcare?
+          <h2 style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', fontWeight: 950, marginBottom: 20 }}>
+            The Future of Clinical Intelligence is Here.
           </h2>
-          <p style={{
-            color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.7,
-            maxWidth: 600, margin: '0 auto 36px',
-          }}>
-            Start your first consultation or analyze a lab report in under 60 seconds. No sign-up required for the demo.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', maxWidth: 600, margin: '0 auto 40px' }}>
+            Join thousands of providers who are reclaiming their time with MediSense AI.
           </p>
-          <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link to="/doctor"><button className="btn-primary" style={{ padding: '14px 30px', fontSize: '0.95rem' }}>Start as Doctor</button></Link>
-            <Link to="/patient"><button className="btn-primary" style={{ padding: '14px 30px', fontSize: '0.95rem', background: 'linear-gradient(135deg, #05aebb 0%, #4ade80 100%)' }}>Start as Patient</button></Link>
-            <Link to="/contact"><button className="btn-secondary" style={{ padding: '14px 30px', fontSize: '0.95rem' }}>Contact Sales</button></Link>
+          <div style={{ display: 'flex', gap: 20, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link to="/register"><button className="btn-primary" style={{ padding: '16px 40px' }}>Get Started Free</button></Link>
+            <Link to="/contact"><button className="btn-secondary" style={{ padding: '16px 40px' }}>Schedule a Demo</button></Link>
           </div>
         </div>
       </section>
