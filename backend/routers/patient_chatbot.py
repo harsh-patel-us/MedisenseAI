@@ -52,6 +52,7 @@ from models.patient_chatbot_models import (
     ChatFileReference,
     DoctorCard,
     DoctorListResponse,
+    EmergencyAlertPayload,
     EndSessionRequest,
     EndSessionResponse,
     PatientChatHistoryResponse,
@@ -67,8 +68,18 @@ from models.patient_chatbot_models import (
     SpecialtiesResponse,
     SpecialtyOption,
 )
+from services import claude_service
 from services.auth_service import decode_token, get_current_user
 from services.chat_ws import chat_manager
+from services.emergency_screening_service import (
+    get_emergency_contacts,
+    screen_for_emergency,
+)
+from services.medication_service import (
+    extract_medications_from_text,
+    run_interaction_check,
+    save_medications,
+)
 from services.patient_chatbot import (
     ChatAttachment,
     SessionAttachmentMemo,
@@ -244,6 +255,25 @@ def _derive_sender_type(role: str) -> str:
     if role == "doctor":
         return "doctor"
     return "ai"
+
+
+def _parse_emergency_alert(blob: Optional[str]) -> Optional[EmergencyAlertPayload]:
+    """Pull a previously-persisted emergency alert off `message_metadata`."""
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    inner = data.get("emergency_alert")
+    if not isinstance(inner, dict):
+        return None
+    try:
+        return EmergencyAlertPayload(**inner)
+    except Exception:
+        return None
 
 
 async def _resolve_sender_names(
@@ -459,12 +489,121 @@ async def send_message(
         ).first()
         assigned_doctor_name = doc[0] if doc else None
 
+    # ── Medication mention detection ───────────────────────────────────
+    # If the patient typed something that looks like it mentions a drug,
+    # extract the meds and refresh interaction alerts inline so any
+    # major / contraindicated alert can be folded into THIS turn's prompt.
+    # Failure is silent — we never want to break the chat over it.
+    MED_KEYWORDS = (
+        "mg", "tablet", "capsule", "prescription",
+        "medicine", "drug", "pill", "dose",
+    )
+    ai_user_message = payload.message
+    if payload.message:
+        lowered = payload.message.lower()
+        if any(k in lowered for k in MED_KEYWORDS):
+            try:
+                extracted = await extract_medications_from_text(
+                    payload.message, claude_service
+                )
+                if extracted:
+                    await save_medications(
+                        patient_id=user.id,
+                        medications=extracted,
+                        source="chatbot_mention",
+                        db_session=db,
+                    )
+                    alerts = await run_interaction_check(
+                        user.id, db, claude_service
+                    )
+                    serious = [
+                        a for a in alerts
+                        if a.severity in ("major", "contraindicated")
+                    ]
+                    if serious:
+                        warn_lines = [
+                            "⚠️ INTERACTION ALERT (system note, not from patient):"
+                        ]
+                        for a in serious:
+                            warn_lines.append(
+                                f"- {a.drug_a} + {a.drug_b} [{a.severity}]: "
+                                f"{a.description or ''}"
+                            )
+                        warn_lines.append(
+                            "Address this in your response to the patient."
+                        )
+                        warn_lines.append("---")
+                        ai_user_message = (
+                            "\n".join(warn_lines) + "\n" + (payload.message or "")
+                        )
+            except Exception as exc:
+                logger.warning(f"Chatbot medication hook failed: {exc}")
+
+    # ── Emergency red-flag pre-screening ───────────────────────────────
+    # Run a fast classifier on the patient's raw message with a hard 3 s
+    # budget. The screen runs FIRST but never blocks the conversation —
+    # any failure (timeout, parse error, network) collapses to a no-op
+    # neutral result. When an emergency is detected we both attach the
+    # structured alert to the response AND prepend a CRITICAL instruction
+    # to the AI prompt for this turn so the assistant addresses it head-on.
+    emergency_payload: Optional[EmergencyAlertPayload] = None
+    emergency_meta: Optional[dict] = None
+    if (
+        payload.message
+        and payload.message.strip()
+        and (session.session_mode or "ai") == "ai"
+        and not session.doctor_joined
+    ):
+        try:
+            screen_result = await asyncio.wait_for(
+                screen_for_emergency(payload.message, claude_service),
+                timeout=3.0,
+            )
+        except asyncio.TimeoutError:
+            screen_result = {
+                "is_emergency": False,
+                "severity": "none",
+                "detected_symptoms": [],
+                "emergency_message": None,
+            }
+        except Exception as exc:
+            logger.warning(f"Emergency screen errored: {exc}")
+            screen_result = {
+                "is_emergency": False,
+                "severity": "none",
+                "detected_symptoms": [],
+                "emergency_message": None,
+            }
+
+        if screen_result.get("is_emergency"):
+            contacts = get_emergency_contacts("IN")
+            emergency_payload = EmergencyAlertPayload(
+                severity=screen_result.get("severity") or "see_doctor_today",
+                detected_symptoms=screen_result.get("detected_symptoms") or [],
+                emergency_message=screen_result.get("emergency_message"),
+                contacts=contacts,
+            )
+            emergency_meta = emergency_payload.model_dump()
+            symptoms_str = ", ".join(emergency_payload.detected_symptoms) or "red-flag symptoms"
+            emergency_number = contacts.get("emergency", "112")
+            critical_lines = [
+                "CRITICAL: The patient's message contains emergency symptoms: "
+                f"{symptoms_str}. Start your response by strongly urging them to "
+                "seek immediate emergency care. Provide the emergency number "
+                f"{emergency_number}. Do not engage in normal health advice "
+                "conversation until you have addressed the emergency.",
+                "---",
+            ]
+            ai_user_message = (
+                "\n".join(critical_lines) + "\n" + (ai_user_message or "")
+            )
+
     if (session.session_mode or "ai") == "ai" and not session.doctor_joined:
         reply = await generate_chat_reply(
             db=db,
             patient_id=user.id,
             history=history,
-            user_message=payload.message,
+            user_message=ai_user_message,
             attachments=runtime_attachments,
             session_attachments=session_memos,
             specialty_id=session.specialty,
@@ -553,6 +692,11 @@ async def send_message(
     assistant_message_id: Optional[str] = None
     if reply:
         assistant_message_id = generate_id()
+        # Pickle the emergency alert (when present) onto message_metadata so
+        # the same banner re-appears on page reload via /session/{id}.
+        meta_payload: dict = {}
+        if emergency_meta:
+            meta_payload["emergency_alert"] = emergency_meta
         db.add(
             PatientChatMessage(
                 id=assistant_message_id,
@@ -563,6 +707,9 @@ async def send_message(
                 created_at=now,
                 sender_type="ai",
                 sender_id=None,
+                message_metadata=(
+                    json.dumps(meta_payload) if meta_payload else None
+                ),
             )
         )
     user_turn_count = 1 if (user_text or persisted_refs) else 0
@@ -614,6 +761,7 @@ async def send_message(
                     "content": reply,
                     "created_at": now.isoformat(),
                     "file_references": [],
+                    "emergency_alert": emergency_meta,
                 },
             },
         )
@@ -622,6 +770,7 @@ async def send_message(
         session_id=session.id,
         reply=reply,
         is_new_session=is_new_session,
+        emergency_alert=emergency_payload,
     )
 
 
@@ -750,6 +899,7 @@ async def get_session(
                 sender_type=m.sender_type or _derive_sender_type(m.role),  # type: ignore[arg-type]
                 sender_id=m.sender_id,
                 sender_name=name_by_msg.get(m.id),
+                emergency_alert=_parse_emergency_alert(m.message_metadata),
             )
             for m in msgs
         ],

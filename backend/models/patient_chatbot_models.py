@@ -3,7 +3,7 @@ patient_chatbot_models.py — Pydantic schemas for the patient-side persistent
 medical chatbot ("Medisense AI").
 """
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,19 @@ class ChatFileReference(BaseModel):
     attachment_id: Optional[str] = None
 
 
+class EmergencyAlertPayload(BaseModel):
+    """Red-flag screening result attached to a chatbot turn.
+
+    `severity` mirrors the screener: "immediate_911" | "urgent_er" |
+    "see_doctor_today" | "none". `contacts` is a region lookup like
+    {"emergency": "112", "ambulance": "108"}.
+    """
+    severity: str
+    detected_symptoms: List[str] = Field(default_factory=list)
+    emergency_message: Optional[str] = None
+    contacts: Dict[str, str] = Field(default_factory=dict)
+
+
 class PatientChatMessageDTO(BaseModel):
     id: str
     role: ChatRole
@@ -48,6 +61,9 @@ class PatientChatMessageDTO(BaseModel):
     sender_type: Optional[SenderType] = None
     sender_id: Optional[str] = None
     sender_name: Optional[str] = None
+    # Persisted emergency screening result for this message, if any.
+    # Survives page reload because it's stored on `message_metadata` JSON.
+    emergency_alert: Optional[EmergencyAlertPayload] = None
 
 
 class PatientChatSessionSummary(BaseModel):
@@ -89,6 +105,10 @@ class PatientChatResponse(BaseModel):
     session_id: str
     reply: str
     is_new_session: bool
+    # Populated only when the pre-screen flagged the patient's message as
+    # an emergency. The frontend renders a prominent banner above the
+    # assistant reply when this is non-null.
+    emergency_alert: Optional[EmergencyAlertPayload] = None
 
 
 class PatientChatHistoryResponse(BaseModel):

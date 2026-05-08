@@ -8,6 +8,7 @@ GET  /patient/history/{id}            → full analysis for one record
 GET  /patient/history/{id}/file       → download the original uploaded file
 GET  /patient/history/{id}/pdf        → download the AI-generated PDF
 """
+import asyncio
 import json
 import logging
 from urllib.parse import quote
@@ -22,18 +23,31 @@ from config import settings
 from models.patient_models import (
     UploadResponse,
     AnalyzeRequest,
+    MedicationAlert,
     PatientAnalysis,
     ExportPdfRequest,
     HistoryItem,
     HistoryListResponse,
     HistoryDetail,
 )
+from services import claude_service as claude_service_module
 from services.report_parser import parse_uploaded_file, looks_like_extraction_failure
 from services.claude_service import analyze_report, generate_summary_and_specialists, generate_lifestyle_guide
+from services.medication_service import (
+    extract_medications_from_text,
+    run_interaction_check,
+    save_medications,
+)
 from services.pdf_export import generate_patient_pdf
 from services.auth_service import require_role
 from utils.helpers import generate_id, validate_file_type, validate_file_size, safe_filename
-from database import get_db, PatientAnalysisRecord, User
+from database import (
+    AsyncSessionLocal,
+    MedicationInteractionAlert,
+    PatientAnalysisRecord,
+    User,
+    get_db,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/patient", tags=["patient"])
@@ -43,6 +57,55 @@ router = APIRouter(prefix="/patient", tags=["patient"])
 # Files are persisted as BYTEA/BLOB on PatientAnalysisRecord — nothing is
 # written to the local filesystem.
 _upload_cache: dict[str, dict] = {}
+
+
+async def _extract_and_check_meds_bg(patient_id: str, raw_text: str) -> None:
+    """Background medication extraction + interaction check for /analyze.
+
+    Runs in its own DB session so the request handler can return immediately
+    while OpenFDA + LLM calls finish in the background. Failures are logged
+    and swallowed.
+    """
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            extracted = await extract_medications_from_text(
+                raw_text, claude_service_module
+            )
+            if not extracted:
+                return
+            await save_medications(
+                patient_id=patient_id,
+                medications=extracted,
+                source="prescription_upload",
+                db_session=bg_db,
+            )
+            await run_interaction_check(patient_id, bg_db, claude_service_module)
+    except Exception as exc:
+        logger.warning(f"Background medication processing failed: {exc}")
+
+
+async def _current_medication_alerts(
+    patient_id: str, db: AsyncSession
+) -> list[MedicationAlert]:
+    """Snapshot of undismissed interaction alerts on file right now."""
+    result = await db.execute(
+        select(MedicationInteractionAlert)
+        .where(
+            MedicationInteractionAlert.patient_id == patient_id,
+            MedicationInteractionAlert.is_dismissed == False,  # noqa: E712
+        )
+        .order_by(MedicationInteractionAlert.created_at.desc())
+    )
+    return [
+        MedicationAlert(
+            id=a.id,
+            drug_a=a.drug_a,
+            drug_b=a.drug_b,
+            severity=a.severity,
+            description=a.description or "",
+        )
+        for a in result.scalars().all()
+    ]
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -149,6 +212,11 @@ async def analyze_patient_report(
         logger.info(f"[{request.file_id}] Generating lifestyle guide...")
         lifestyle_data = await generate_lifestyle_guide(conditions, findings_summary)
 
+        # Snapshot alerts already on file BEFORE we kick off the background
+        # extraction so the response includes the patient's most recent
+        # known interactions even on a fresh report.
+        current_alerts = await _current_medication_alerts(_user.id, db)
+
         # Merge everything into PatientAnalysis
         analysis = PatientAnalysis(
             report_type=findings_data.get("report_type", "other"),
@@ -164,6 +232,7 @@ async def analyze_patient_report(
             exercise_plan=lifestyle_data.get("exercise_plan", []),
             exercises_to_avoid=lifestyle_data.get("exercises_to_avoid", []),
             precautions=lifestyle_data.get("precautions", {}),
+            medication_alerts=current_alerts,
         )
 
         # Persist to DB, linked to the authenticated patient.
@@ -189,6 +258,12 @@ async def analyze_patient_report(
 
         # Bytes are now safe in the DB; drop the in-memory copy.
         _upload_cache.pop(request.file_id, None)
+
+        # Fire-and-forget medication extraction so a slow OpenFDA / LLM
+        # round-trip never blocks the analysis response. Newly-extracted
+        # drugs surface on the next /medications/{patient_id}/interactions
+        # call from the medication tracker UI.
+        asyncio.create_task(_extract_and_check_meds_bg(_user.id, raw_text))
 
         return analysis
 

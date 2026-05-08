@@ -13,6 +13,7 @@ from routers import (
     chatbot,
     doctor,
     google_oauth,
+    medications,
     meet,
     patient,
     patient_chatbot,
@@ -77,6 +78,7 @@ app.include_router(chatbot.router, prefix=_API)
 app.include_router(patient_chatbot.router, prefix=_API)
 app.include_router(google_oauth.router, prefix=_API)
 app.include_router(meet.router, prefix=_API)
+app.include_router(medications.router, prefix=_API)
 
 
 # ── Health check ───────────────────────────────────────────────────────────

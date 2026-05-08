@@ -46,6 +46,10 @@ def _to_public(user: User) -> UserPublic:
         bio=user.bio,
         date_of_birth=user.date_of_birth,
         gender=user.gender,
+        blood_group=user.blood_group,
+        address=user.address,
+        emergency_contact_name=user.emergency_contact_name,
+        emergency_contact_phone=user.emergency_contact_phone,
         has_profile_pic=user.profile_pic_data is not None,
     )
 
@@ -151,6 +155,14 @@ async def update_profile(
         user.date_of_birth = body.date_of_birth
     if body.gender is not None:
         user.gender = body.gender
+    if body.blood_group is not None:
+        user.blood_group = body.blood_group
+    if body.address is not None:
+        user.address = body.address
+    if body.emergency_contact_name is not None:
+        user.emergency_contact_name = body.emergency_contact_name
+    if body.emergency_contact_phone is not None:
+        user.emergency_contact_phone = body.emergency_contact_phone
 
     await db.commit()
     await db.refresh(user)

@@ -14,6 +14,10 @@ export interface AuthUser {
   bio?: string | null;
   date_of_birth?: string | null;
   gender?: string | null;
+  blood_group?: string | null;
+  address?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
   has_profile_pic?: boolean;
 }
 

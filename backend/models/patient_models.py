@@ -58,6 +58,15 @@ class Precautions(BaseModel):
     emergency_signs: List[str] = []
 
 
+class MedicationAlert(BaseModel):
+    """One pairwise drug-drug interaction surfaced for this patient."""
+    id: str
+    drug_a: str
+    drug_b: str
+    severity: str  # "contraindicated" | "major" | "moderate" | "minor"
+    description: str = ""
+
+
 class PatientAnalysis(BaseModel):
     report_type: str = "other"
     findings: List[Finding] = []
@@ -72,6 +81,11 @@ class PatientAnalysis(BaseModel):
     exercise_plan: List[ExerciseItem] = []
     exercises_to_avoid: List[str] = []
     precautions: Precautions = Precautions()
+    # Drug-drug interaction alerts already on file for this patient at the
+    # moment the analysis returned. The report's own medication extraction
+    # runs in the background, so newly-extracted drugs may show up on the
+    # next call to /medications/{patient_id}/interactions.
+    medication_alerts: List[MedicationAlert] = []
 
 
 class UploadResponse(BaseModel):

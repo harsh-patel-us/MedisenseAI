@@ -23,10 +23,15 @@ export default function ReportUploader({ isUploading, onUpload, uploadedFileName
   };
 
   return (
-    <div className="glass-card" style={{ padding: '28px' }}>
-      <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        📤 Upload Medical Report
-      </h2>
+    <div className="glass-card" style={{ padding: '32px' }}>
+      <div style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '1.5rem' }}>📤</span> Upload Medical Report
+        </h2>
+        <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+          Securely upload your health documents for instant AI analysis and personalized guidance.
+        </p>
+      </div>
 
       <div
         className={`dropzone ${dragOver ? 'drag-over' : ''}`}
@@ -46,33 +51,55 @@ export default function ReportUploader({ isUploading, onUpload, uploadedFileName
         />
 
         {isUploading ? (
-          <div>
-            <div className="spinner" style={{ margin: '0 auto 16px' }} />
-            <p style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--brand-teal)' }}>
-              Uploading & extracting text...
+          <div style={{ textAlign: 'center' }}>
+            <div className="spinner" style={{ margin: '0 auto 24px', width: '56px', height: '56px', borderWidth: '4px' }} />
+            <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-teal)', marginBottom: '8px' }}>
+              Processing Document...
+            </p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              Extracting medical data and preparing analysis
             </p>
           </div>
         ) : uploadedFileName ? (
-          <div>
-            <p style={{ fontSize: '2rem', marginBottom: '8px' }}>✅</p>
-            <p style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--brand-teal)' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="dropzone-icon-glow">✅</div>
+            <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-teal)', marginBottom: '8px' }}>
               {uploadedFileName}
             </p>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-              Click or drag to replace with a different file
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Successfully uploaded and analyzed
             </p>
+            <button className="btn-secondary" style={{ padding: '8px 20px', fontSize: '0.8rem' }}>
+              Replace File
+            </button>
           </div>
         ) : (
-          <div>
-            <p style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</p>
-            <p style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
-              Drop your medical report here
+          <div style={{ textAlign: 'center' }}>
+            <div className="dropzone-icon-glow">📄</div>
+            <p style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '8px' }}>
+              Drop your report here
             </p>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              or <span style={{ color: 'var(--brand-teal)', fontWeight: 600 }}>click to browse</span>
+            <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              or <span style={{ color: 'var(--brand-teal)', fontWeight: 700, textDecoration: 'underline' }}>browse your files</span>
             </p>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '12px' }}>
-              Supports PDF, JPG, PNG • Max 20 MB
+            
+            <div style={{ 
+              display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '12px',
+              padding: '12px 24px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <span>🔒 Secure</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <span>⚡ Instant</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <span>📏 Max 20MB</span>
+              </div>
+            </div>
+            
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '20px' }}>
+              Supports PDF, JPG, PNG formats
             </p>
           </div>
         )}

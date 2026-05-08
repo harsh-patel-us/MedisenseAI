@@ -5,6 +5,8 @@ import ReportSummary from '../components/patient/ReportSummary';
 import SpecialistGuide from '../components/patient/SpecialistGuide';
 import DietExercisePlan from '../components/patient/DietExercisePlan';
 import PrecautionsList from '../components/patient/PrecautionsList';
+import MedicationTracker from '../components/patient/MedicationTracker';
+import { useAuth } from '../contexts/AuthContext';
 import {
   uploadReport,
   analyzeReport,
@@ -21,13 +23,14 @@ import type {
   UrgencyLevel,
 } from '../types/patient.types';
 
-type TabKey = 'summary' | 'specialist' | 'diet' | 'precautions';
+type TabKey = 'summary' | 'specialist' | 'diet' | 'precautions' | 'medications';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'summary', label: 'Report Summary', icon: '📋' },
   { key: 'specialist', label: 'Specialist Guide', icon: '🏥' },
   { key: 'diet', label: 'Diet & Exercise', icon: '🥗' },
   { key: 'precautions', label: 'Precautions', icon: '⚠️' },
+  { key: 'medications', label: 'Medications', icon: '💊' },
 ];
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -47,6 +50,7 @@ function formatHistoryDate(iso: string): string {
 }
 
 export default function PatientReportUpload() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>('summary');
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -329,6 +333,9 @@ export default function PatientReportUpload() {
               {activeTab === 'precautions' && (
                 <PrecautionsList precautions={analysis.precautions} />
               )}
+              {activeTab === 'medications' && user?.id && (
+                <MedicationTracker patientId={user.id} />
+              )}
             </div>
 
             {/* Disclaimer */}
@@ -393,61 +400,59 @@ export default function PatientReportUpload() {
                 return (
                   <div
                     key={item.id}
-                    style={{
-                      padding: '14px 16px',
-                      borderRadius: '12px',
-                      border: isOpen
-                        ? '1px solid rgba(5,174,187,0.45)'
-                        : '1px solid var(--border-subtle)',
-                      background: isOpen
-                        ? 'rgba(5,174,187,0.08)'
-                        : 'rgba(6,13,27,0.45)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
+                    className={`history-item-card ${isOpen ? 'active' : ''}`}
+                    onClick={() => !isOpen && handleOpenHistory(item)}
+                    style={{ cursor: isOpen ? 'default' : 'pointer' }}
                   >
                     <div style={{
                       display: 'flex', justifyContent: 'space-between',
-                      alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap',
+                      alignItems: 'flex-start', gap: 12, flexWrap: 'wrap',
                     }}>
                       <div style={{ flex: 1, minWidth: 200 }}>
                         <div style={{
-                          fontSize: '0.92rem', fontWeight: 700,
-                          color: 'var(--text-primary)', marginBottom: '2px',
+                          fontSize: '0.95rem', fontWeight: 800,
+                          color: isOpen ? 'var(--brand-teal)' : 'var(--text-primary)', 
+                          marginBottom: '4px',
                           wordBreak: 'break-word',
+                          display: 'flex', alignItems: 'center', gap: '8px'
                         }}>
-                          {item.file_name || 'Untitled report'}
+                          {isOpen ? '📖' : '📄'} {item.file_name || 'Untitled report'}
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {formatHistoryDate(item.created_at)}
-                          {item.urgency ? ` • urgency: ${item.urgency}` : ''}
-                          {item.has_generated_pdf ? ' • PDF ready' : ''}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '12px' }}>
+                          <span>📅 {formatHistoryDate(item.created_at)}</span>
+                          {item.urgency && (
+                            <span style={{ 
+                              color: item.urgency === 'routine' ? '#4ade80' : '#f87171',
+                              fontWeight: 700, textTransform: 'uppercase', fontSize: '0.7rem'
+                            }}>
+                              • {item.urgency}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         <button
                           className="btn-secondary"
-                          style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                          style={{ fontSize: '0.78rem', padding: '6px 12px', background: isOpen ? 'rgba(5,174,187,0.2)' : '' }}
                           disabled={busy}
-                          onClick={() => void handleOpenHistory(item)}
+                          onClick={(e) => { e.stopPropagation(); handleOpenHistory(item); }}
                         >
-                          {busy && !isOpen ? 'Opening…' : isOpen ? '✓ Open' : '📖 View'}
+                          {busy && !isOpen ? 'Opening…' : isOpen ? '✓ Open' : 'View'}
                         </button>
                         <button
                           className="btn-secondary"
                           style={{ fontSize: '0.78rem', padding: '6px 12px' }}
                           disabled={busy || !item.has_uploaded_file}
-                          onClick={() => void handleDownloadHistoryFile(item)}
+                          onClick={(e) => { e.stopPropagation(); handleDownloadHistoryFile(item); }}
                           title={item.has_uploaded_file ? 'Download original file' : 'Original file not stored'}
                         >
-                          📎 Original
+                          📎 File
                         </button>
                         <button
                           className="btn-primary"
-                          style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                          style={{ fontSize: '0.78rem', padding: '6px 12px', background: item.has_generated_pdf ? 'var(--gradient-brand)' : 'rgba(255,255,255,0.05)', color: item.has_generated_pdf ? 'white' : 'var(--text-muted)' }}
                           disabled={busy || !item.has_generated_pdf}
-                          onClick={() => void handleDownloadHistoryPdf(item)}
+                          onClick={(e) => { e.stopPropagation(); handleDownloadHistoryPdf(item); }}
                           title={item.has_generated_pdf ? 'Download generated PDF' : 'No PDF generated yet'}
                         >
                           📥 PDF

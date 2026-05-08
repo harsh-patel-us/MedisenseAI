@@ -39,15 +39,23 @@ class UserPublic(BaseModel):
     bio: str | None = None
     date_of_birth: datetime | None = None
     gender: str | None = None
+    blood_group: str | None = None
+    address: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None
     has_profile_pic: bool = False
 
 
 class ProfileUpdateRequest(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
-    phone_number: str | None = Field(default=None, max_length=20)
+    phone_number: str | None = Field(default=None, max_length=20, pattern=r"^\+?[0-9\s\-()]*$")
     bio: str | None = Field(default=None, max_length=1000)
     date_of_birth: datetime | None = None
     gender: str | None = None
+    blood_group: str | None = Field(default=None, max_length=10)
+    address: str | None = Field(default=None, max_length=500)
+    emergency_contact_name: str | None = Field(default=None, max_length=120)
+    emergency_contact_phone: str | None = Field(default=None, max_length=20, pattern=r"^\+?[0-9\s\-()]*$")
 
 
 class AuthResponse(BaseModel):

@@ -19,9 +19,11 @@ import type {
   ChatAttachmentUpload,
   ChatFileReference,
   DoctorCard,
+  EmergencyAlert as EmergencyAlertData,
   PatientChatMessage,
   PatientChatSessionSummary,
 } from '../types/patientChatbot.types';
+import EmergencyAlert from '../components/patient/EmergencyAlert';
 
 const TEAL = '#05aebb';
 const TEAL_DARK = '#0f6e56';
@@ -488,26 +490,40 @@ export default function PatientChat() {
             role: 'assistant',
             content: res.reply,
             created_at: new Date().toISOString(),
+            emergency_alert: res.emergency_alert ?? null,
           };
           setMessages((prev) => {
             // If the WebSocket already pushed the real message (broadcast happens at the end
-            // of the backend handler), don't add the manual one.
-            if (
-              prev.some(
-                (m) =>
-                  m.role === 'assistant' &&
-                  m.content === res.reply &&
-                  !m.id.startsWith('srv-') &&
-                  !m.pending
-              )
-            ) {
-              return prev.filter((m) => m.id !== loadingMsg.id);
+            // of the backend handler), don't add the manual one — but make
+            // sure the emergency alert from the response is attached to it.
+            const wsAlready = prev.find(
+              (m) =>
+                m.role === 'assistant' &&
+                m.content === res.reply &&
+                !m.id.startsWith('srv-') &&
+                !m.pending,
+            );
+            if (wsAlready) {
+              return prev
+                .filter((m) => m.id !== loadingMsg.id)
+                .map((m) =>
+                  m.id === wsAlready.id && res.emergency_alert
+                    ? { ...m, emergency_alert: res.emergency_alert }
+                    : m,
+                );
             }
             return prev.filter((m) => m.id !== loadingMsg.id).concat(assistantMsg);
           });
 
-          // Auto-play TTS if enabled
-          if (ttsEnabled) {
+          // If the screener flagged an emergency, scroll the alert into
+          // view immediately. Skip auto-play TTS — the visual banner is
+          // the primary signal and we don't want speech to compete.
+          if (res.emergency_alert) {
+            setTimeout(() => {
+              const el = scrollRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            }, 60);
+          } else if (ttsEnabled) {
             playTTS(res.reply);
           }
         } else {
@@ -1097,7 +1113,15 @@ export default function PatientChat() {
           )}
 
           {messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} />
+            <div key={m.id} style={{ display: 'flex', flexDirection: 'column' }}>
+              {m.emergency_alert && (
+                <EmergencyAlert
+                  key={`alert-${m.id}`}
+                  alert={m.emergency_alert as EmergencyAlertData}
+                />
+              )}
+              <MessageBubble msg={m} />
+            </div>
           ))}
         </div>
 

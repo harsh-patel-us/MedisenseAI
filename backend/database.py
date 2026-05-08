@@ -101,6 +101,10 @@ class User(Base):
     # Common medical/personal fields
     date_of_birth: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     gender: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    blood_group: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    emergency_contact_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # ── Google Calendar OAuth ────────────────────────────────────────────
     # Populated when the user connects their Google account on the schedule
@@ -361,6 +365,66 @@ class DoctorChatSession(Base):
     )
 
 
+class PatientMedication(Base):
+    """A medication a patient is currently (or was previously) taking.
+
+    Rows are written by three sources: extraction from an uploaded
+    prescription, extraction from a chatbot mention, and manual entry from
+    the patient's medication tracker UI. Soft-delete is via `is_active`.
+    """
+    __tablename__ = "patient_medications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    patient_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    drug_name: Mapped[str] = mapped_column(String, nullable=False)
+    dosage: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    frequency: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prescribed_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    start_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Integer, default=True)
+    # "prescription_upload" | "chatbot_mention" | "manual"
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_patient_medications_patient_active", "patient_id", "is_active"),
+    )
+
+
+class MedicationInteractionAlert(Base):
+    """A pairwise drug-drug interaction surfaced for a patient.
+
+    Each row represents one (drug_a, drug_b) pair the system has flagged.
+    The patient (and downstream UI) can dismiss alerts they have already
+    acknowledged so they don't keep re-appearing on every interaction check.
+    """
+    __tablename__ = "medication_interaction_alerts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    patient_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    drug_a: Mapped[str] = mapped_column(String, nullable=False)
+    drug_b: Mapped[str] = mapped_column(String, nullable=False)
+    # "contraindicated" | "major" | "moderate" | "minor"
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="openfda")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_dismissed: Mapped[bool] = mapped_column(Integer, default=False)
+
+    __table_args__ = (
+        Index(
+            "ix_medication_alerts_patient_dismissed",
+            "patient_id",
+            "is_dismissed",
+        ),
+    )
+
+
 class PatientChatAudit(Base):
     """Append-only audit trail for every patient-chat API access."""
     __tablename__ = "patient_chat_audit"
@@ -452,6 +516,10 @@ async def init_db():
                 ("profile_pic_mime", "VARCHAR"),
                 ("date_of_birth", "TIMESTAMP"),
                 ("gender", "VARCHAR"),
+                ("blood_group", "VARCHAR"),
+                ("address", "TEXT"),
+                ("emergency_contact_name", "VARCHAR"),
+                ("emergency_contact_phone", "VARCHAR"),
             ],
         }
 

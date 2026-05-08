@@ -320,3 +320,86 @@ body {
 .dot.yellow { background: #ffbd2e; }
 .dot.green { background: #27c93f; }
 
+/* ── Dropzone ────────────────────────────────────────────────────────── */
+.dropzone {
+  border: 2px dashed var(--border-subtle);
+  border-radius: 20px;
+  padding: 60px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  background: rgba(13, 148, 136, 0.02);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropzone:hover {
+  border-color: var(--brand-teal);
+  background: rgba(13, 148, 136, 0.08);
+  box-shadow: 0 0 30px rgba(13, 148, 136, 0.15);
+  transform: translateY(-2px) scale(1.005);
+}
+
+.dropzone.drag-over {
+  border-color: var(--brand-cyan);
+  background: rgba(6, 182, 212, 0.1);
+  border-style: solid;
+  box-shadow: 0 0 40px rgba(6, 182, 212, 0.2);
+  transform: scale(1.02);
+}
+
+.dropzone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(13, 148, 136, 0.1) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.dropzone:hover::before {
+  opacity: 1;
+}
+
+.dropzone-icon-glow {
+  font-size: 3.5rem;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 0 10px rgba(13, 148, 136, 0.3));
+  transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.dropzone:hover .dropzone-icon-glow {
+  transform: translateY(-10px) rotate(5deg);
+}
+
+/* ── History Items ───────────────────────────────────────────────────── */
+.history-item-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(6, 13, 27, 0.4);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-item-card:hover {
+  border-color: rgba(13, 148, 136, 0.4);
+  background: rgba(13, 148, 136, 0.06);
+  transform: translateX(4px);
+  box-shadow: -4px 0 15px rgba(13, 148, 136, 0.1);
+}
+
+.history-item-card.active {
+  border-color: var(--brand-teal);
+  background: rgba(13, 148, 136, 0.12);
+  box-shadow: 0 0 20px rgba(13, 148, 136, 0.1);
+}
+
+
+

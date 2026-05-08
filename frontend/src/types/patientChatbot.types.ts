@@ -19,6 +19,19 @@ export interface ChatAttachmentUpload {
   kind: PatientAttachmentKind;
 }
 
+export type EmergencySeverity =
+  | 'immediate_911'
+  | 'urgent_er'
+  | 'see_doctor_today'
+  | 'none';
+
+export interface EmergencyAlert {
+  severity: EmergencySeverity | string;
+  detected_symptoms: string[];
+  emergency_message: string | null;
+  contacts: Record<string, string>;
+}
+
 export interface PatientChatMessage {
   id: string;
   role: PatientChatRole;
@@ -28,6 +41,7 @@ export interface PatientChatMessage {
   sender_type?: PatientSenderType | null;
   sender_id?: string | null;
   sender_name?: string | null;
+  emergency_alert?: EmergencyAlert | null;
 }
 
 export interface PatientChatSessionSummary {
@@ -79,6 +93,7 @@ export interface PatientChatSendResponse {
   session_id: string;
   reply: string;
   is_new_session: boolean;
+  emergency_alert?: EmergencyAlert | null;
 }
 
 export interface PatientChatHistoryResponse {
