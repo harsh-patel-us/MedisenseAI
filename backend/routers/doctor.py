@@ -5,17 +5,19 @@ POST /doctor/generate-note → NER + AI SOAP note generation
 POST /doctor/export-pdf    → SOAP note PDF
 GET  /doctor/sessions      → Past consultation sessions
 """
+import asyncio
 import json
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 
 from config import settings
 from models.doctor_models import (
+    AuditIssue, SoapAuditResponse,
     TranscriptSegment, UploadAudioResponse,
     DoctorChatActiveSession, DoctorChatListItem, DoctorChatListResponse,
     DoctorChatMessageRequest,
@@ -26,6 +28,7 @@ from models.patient_chatbot_models import (
     PatientChatSessionMessagesResponse, PatientChatMessageDTO, ChatFileReference,
 )
 
+from services import claude_service as claude_service_module
 from services.transcription import transcribe_audio
 from services.diarization import diarize
 from services.ner import extract_medical_entities
@@ -33,6 +36,7 @@ from services.claude_service import generate_soap_note
 from services.chat_ws import chat_manager
 from services.pdf_export import generate_soap_pdf
 from services.auth_service import require_role
+from services.soap_audit_service import audit_soap_note, parse_persisted_audit
 from services.specialties import specialty_name
 from utils.helpers import generate_id, format_transcript_for_prompt, validate_file_size
 from utils.storage import save_soap_pdf
@@ -276,14 +280,78 @@ async def generate_note(
     session.labeled_transcript = json.dumps(transcript_dicts)
     session.extracted_entities = json.dumps(entities_raw)
     session.soap_note = json.dumps(soap_dict)
+    # Reset any previously-persisted audit so the GET endpoint reports
+    # "pending" until the new background audit lands.
+    session.soap_audit = None
     session.status = "completed"
 
     await db.commit()
+
+    # Fire-and-forget second-opinion audit. Doctors keep editing while
+    # the audit runs; the result lands on consultation_sessions.soap_audit
+    # and the frontend polls /sessions/{id}/audit to retrieve it.
+    asyncio.create_task(
+        audit_soap_note(
+            soap_note=soap_dict,
+            transcript=full_text,
+            entities=entities_raw,
+            session_id=request.session_id,
+            claude_service=claude_service_module,
+            db=None,
+        )
+    )
 
     return GenerateNoteResponse(
         soap_note=soap_note,
         entities=entities,
         session_id=request.session_id,
+    )
+
+
+@router.get("/sessions/{session_id}/audit")
+async def get_session_audit(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Fetch the second-opinion audit for a session.
+
+    Returns 200 with the populated SoapAuditResponse once the audit task
+    has finished. Returns 202 with `{"status": "pending"}` while the
+    background task is still running.
+    """
+    result = await db.execute(
+        select(ConsultationSession).where(
+            ConsultationSession.id == session_id,
+            ConsultationSession.doctor_id == _user.id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    audit = parse_persisted_audit(row.soap_audit)
+    if audit is None:
+        return JSONResponse(status_code=202, content={"status": "pending"})
+
+    issues = [
+        AuditIssue(
+            issue=str(it.get("issue", "")),
+            recommendation=str(it.get("recommendation", "")),
+            priority=str(it.get("priority", "medium")),
+        )
+        for it in (audit.get("critical_issues") or [])
+        if isinstance(it, dict)
+    ]
+    return SoapAuditResponse(
+        status=str(audit.get("status") or "complete"),
+        overall_quality=str(audit.get("overall_quality") or ""),
+        overall_score=int(audit.get("overall_score") or 0),
+        critical_issues=issues,
+        missing_differentials=list(audit.get("missing_differentials") or []),
+        documentation_gaps=list(audit.get("documentation_gaps") or []),
+        positive_findings=list(audit.get("positive_findings") or []),
+        reviewer_summary=str(audit.get("reviewer_summary") or ""),
     )
 
 

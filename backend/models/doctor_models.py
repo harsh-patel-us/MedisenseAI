@@ -88,6 +88,30 @@ class UploadAudioResponse(BaseModel):
     raw_text: str
 
 
+# ── Second-opinion SOAP audit ─────────────────────────────────────────────
+
+
+class AuditIssue(BaseModel):
+    """One specific concern raised by the second-opinion reviewer."""
+    issue: str
+    recommendation: str
+    priority: str  # "high" | "medium" | "low"
+
+
+class SoapAuditResponse(BaseModel):
+    """Audit report for a SOAP note. `status` is "complete" once the audit
+    task has finished and "pending" while it is still running. Frontend
+    polls until it sees "complete"."""
+    status: str = "complete"
+    overall_quality: str = ""  # "excellent" | "good" | "adequate" | "needs_improvement"
+    overall_score: int = 0
+    critical_issues: List[AuditIssue] = []
+    missing_differentials: List[str] = []
+    documentation_gaps: List[str] = []
+    positive_findings: List[str] = []
+    reviewer_summary: str = ""
+
+
 class DoctorChatActiveSession(BaseModel):
     id: str
     patient_id: str

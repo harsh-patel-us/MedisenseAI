@@ -133,6 +133,11 @@ class ConsultationSession(Base):
     labeled_transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
     extracted_entities: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # JSON
     soap_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)             # JSON
+    # Async second-opinion clinical audit of the SOAP note. Stored as the
+    # raw JSON string returned by the audit prompt; the GET audit endpoint
+    # parses it into a structured response. NULL means the audit task is
+    # still running (or failed and was swallowed).
+    soap_audit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)             # JSON
     soap_pdf_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     soap_pdf_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, default="in_progress")
@@ -460,6 +465,7 @@ async def init_db():
             "consultation_sessions": [
                 ("doctor_id", "VARCHAR"),
                 ("patient_name", "VARCHAR"),
+                ("soap_audit", "TEXT"),
                 ("soap_pdf_path", "VARCHAR"),
                 ("soap_pdf_size", "INTEGER"),
                 ("meet_conference_id", "VARCHAR"),

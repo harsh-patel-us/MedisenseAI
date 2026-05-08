@@ -1,5 +1,12 @@
 import axios from 'axios';
-import type { GenerateNoteResponse, TranscriptSegment, SoapNote, SessionInfo, UploadAudioResponse } from '../types/doctor.types';
+import type {
+  GenerateNoteResponse,
+  SessionInfo,
+  SoapAuditResponse,
+  SoapNote,
+  TranscriptSegment,
+  UploadAudioResponse,
+} from '../types/doctor.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -58,6 +65,21 @@ export async function exportSoapPdf(
 
 export async function getSessions(): Promise<SessionInfo[]> {
   const response = await axios.get<SessionInfo[]>(`${API_BASE}/doctor/sessions`);
+  return response.data;
+}
+
+/** Fetch the second-opinion audit for a session.
+ *
+ *  The backend returns 202 with `{status: "pending"}` while the audit task
+ *  is still running and 200 with the full report once it lands. We use
+ *  validateStatus to fold the 202 into the same Promise without an axios
+ *  rejection, so the caller can simply read `data.status`.
+ */
+export async function getAuditReport(sessionId: string): Promise<SoapAuditResponse> {
+  const response = await axios.get<SoapAuditResponse>(
+    `${API_BASE}/doctor/sessions/${encodeURIComponent(sessionId)}/audit`,
+    { validateStatus: (s) => s === 200 || s === 202 },
+  );
   return response.data;
 }
 

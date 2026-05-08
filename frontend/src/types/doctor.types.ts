@@ -67,3 +67,31 @@ export interface UploadAudioResponse {
   transcript: TranscriptSegment[];
   raw_text: string;
 }
+
+// ── Second-opinion SOAP audit ────────────────────────────────────────
+
+export type AuditPriority = 'high' | 'medium' | 'low';
+export type AuditQuality =
+  | 'excellent'
+  | 'good'
+  | 'adequate'
+  | 'needs_improvement'
+  | '';
+export type AuditStatus = 'pending' | 'complete' | 'failed';
+
+export interface AuditIssue {
+  issue: string;
+  recommendation: string;
+  priority: AuditPriority | string;
+}
+
+export interface SoapAuditResponse {
+  status: AuditStatus | string;
+  overall_quality: AuditQuality | string;
+  overall_score: number;
+  critical_issues: AuditIssue[];
+  missing_differentials: string[];
+  documentation_gaps: string[];
+  positive_findings: string[];
+  reviewer_summary: string;
+}

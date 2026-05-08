@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import AudioFileUpload from '../components/doctor/AudioFileUpload';
 import TranscriptView from '../components/doctor/TranscriptView';
 import SoapNoteEditor from '../components/doctor/SoapNoteEditor';
+import SoapAuditPanel from '../components/doctor/SoapAuditPanel';
 import { generateNote } from '../api/doctorApi';
 import {
   listUnprocessedSessions,
@@ -322,11 +323,14 @@ export default function DoctorDashboard() {
         {/* Right: SOAP Note Editor */}
         <div>
           {soapNote ? (
-            <SoapNoteEditor
-              soapNote={soapNote}
-              sessionId={sessionId}
-              onUpdate={setSoapNote}
-            />
+            <>
+              <SoapNoteEditor
+                soapNote={soapNote}
+                sessionId={sessionId}
+                onUpdate={setSoapNote}
+              />
+              {sessionId && <SoapAuditPanel sessionId={sessionId} />}
+            </>
           ) : (
             <div className="glass-card" style={{
               padding: '60px 40px', textAlign: 'center',
@@ -591,6 +595,7 @@ export default function DoctorDashboard() {
               sessionId={meetSessionId}
               onUpdate={setMeetSoapNote}
             />
+            {meetSessionId && <SoapAuditPanel sessionId={meetSessionId} />}
           </div>
         )}
       </div>
