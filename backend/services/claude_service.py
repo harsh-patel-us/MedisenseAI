@@ -7,8 +7,9 @@ import json
 import logging
 from openai import AsyncOpenAI
 
-from config import settings
+from config import SUPPORTED_LANGUAGES, normalize_language, settings
 from prompts import (
+    LANGUAGE_INSTRUCTION_TEMPLATE,
     SAFETY_SYSTEM_MESSAGE,
     SOAP_NOTE_PROMPT,
     REPORT_ANALYSIS_PROMPT,
@@ -17,6 +18,22 @@ from prompts import (
     PATIENT_EXPLANATION_PROMPT,
 )
 from utils.helpers import extract_json_from_response
+
+
+def _apply_language(system_msg: str, language: str | None) -> str:
+    """Prepend the language instruction to a system message when needed.
+
+    Returns `system_msg` unchanged for English (the default) and for any
+    code that isn't in SUPPORTED_LANGUAGES. Otherwise prepends the
+    LANGUAGE_INSTRUCTION_TEMPLATE with the language's display name
+    substituted in.
+    """
+    code = normalize_language(language)
+    if code == "en":
+        return system_msg
+    name = SUPPORTED_LANGUAGES.get(code, "English")
+    instruction = LANGUAGE_INSTRUCTION_TEMPLATE.format(language_name=name)
+    return f"{instruction}\n\n{system_msg}"
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +81,15 @@ async def generate_soap_note(
     medications: list[str],
     diagnoses: list[str],
     vitals: list[str],
+    language: str = "en",
 ) -> dict:
     """
     Prompt 1 — Given a labeled transcript and extracted entities,
     generate a structured SOAP clinical note as JSON.
+
+    The doctor-side flow always passes language="en"; the parameter exists
+    for symmetry with the other patient-facing prompts and lets the caller
+    request a localized note when that ever makes sense.
     """
     prompt = SOAP_NOTE_PROMPT.format(
         labeled_transcript=labeled_transcript,
@@ -76,7 +98,7 @@ async def generate_soap_note(
         diagnoses=", ".join(diagnoses) if diagnoses else "None documented",
         vitals=", ".join(vitals) if vitals else "None documented",
     )
-    raw = await _chat(SAFETY_SYSTEM_MESSAGE, prompt)
+    raw = await _chat(_apply_language(SAFETY_SYSTEM_MESSAGE, language), prompt)
     cleaned = extract_json_from_response(raw)
     try:
         return json.loads(cleaned)
@@ -100,6 +122,7 @@ async def generate_patient_explanation(
     soap_dict: dict,
     patient_name: str = "Patient",
     doctor_name: str = "Doctor",
+    language: str = "en",
 ) -> dict:
     """
     Prompt 5 — Given a completed SOAP note, generate a patient-friendly
@@ -111,7 +134,11 @@ async def generate_patient_explanation(
         patient_name=patient_name,
         doctor_name=doctor_name,
     )
-    raw = await _chat(SAFETY_SYSTEM_MESSAGE, prompt, model=settings.medical_model)
+    raw = await _chat(
+        _apply_language(SAFETY_SYSTEM_MESSAGE, language),
+        prompt,
+        model=settings.medical_model,
+    )
     cleaned = extract_json_from_response(raw)
     try:
         return json.loads(cleaned)
@@ -214,13 +241,13 @@ async def extract_text_from_image_vision(image_bytes: bytes, mime: str = "image/
         return ""
 
 
-async def analyze_report(raw_report_text: str) -> dict:
+async def analyze_report(raw_report_text: str, language: str = "en") -> dict:
     """
     Prompt 2 — Extract all test findings from a lab report text.
     Returns structured findings JSON.
     """
     prompt = REPORT_ANALYSIS_PROMPT.format(raw_report_text=raw_report_text)
-    raw = await _chat(SAFETY_SYSTEM_MESSAGE, prompt)
+    raw = await _chat(_apply_language(SAFETY_SYSTEM_MESSAGE, language), prompt)
     cleaned = extract_json_from_response(raw)
     try:
         return json.loads(cleaned)
@@ -229,14 +256,16 @@ async def analyze_report(raw_report_text: str) -> dict:
         return {"report_type": "other", "findings": [], "conditions_suggested": [], "critical_alerts": []}
 
 
-async def generate_summary_and_specialists(findings_json: dict) -> dict:
+async def generate_summary_and_specialists(
+    findings_json: dict, language: str = "en"
+) -> dict:
     """
     Prompt 3 — Generate plain-language patient summary + specialist recommendations.
     """
     prompt = SUMMARY_SPECIALIST_PROMPT.format(
         findings_json=json.dumps(findings_json, indent=2)
     )
-    raw = await _chat(SAFETY_SYSTEM_MESSAGE, prompt)
+    raw = await _chat(_apply_language(SAFETY_SYSTEM_MESSAGE, language), prompt)
     cleaned = extract_json_from_response(raw)
     try:
         return json.loads(cleaned)
@@ -251,7 +280,9 @@ async def generate_summary_and_specialists(findings_json: dict) -> dict:
         }
 
 
-async def generate_lifestyle_guide(conditions: list[str], findings_summary: str) -> dict:
+async def generate_lifestyle_guide(
+    conditions: list[str], findings_summary: str, language: str = "en"
+) -> dict:
     """
     Prompt 4 — Generate diet, exercise, and precautions plan.
     """
@@ -259,7 +290,7 @@ async def generate_lifestyle_guide(conditions: list[str], findings_summary: str)
         conditions=", ".join(conditions) if conditions else "General health maintenance",
         findings_summary=findings_summary,
     )
-    raw = await _chat(SAFETY_SYSTEM_MESSAGE, prompt)
+    raw = await _chat(_apply_language(SAFETY_SYSTEM_MESSAGE, language), prompt)
     cleaned = extract_json_from_response(raw)
     try:
         return json.loads(cleaned)

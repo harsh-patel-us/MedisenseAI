@@ -37,8 +37,9 @@ from openai import AsyncOpenAI
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
+from config import SUPPORTED_LANGUAGES, normalize_language, settings
 from prompts import (
+    LANGUAGE_INSTRUCTION_TEMPLATE,
     PATIENT_CHATBOT_SUMMARY_PROMPT,
     PATIENT_CHATBOT_SYSTEM_PROMPT,
 )
@@ -92,6 +93,10 @@ class ChatContext:
     session_attachments: list[SessionAttachmentMemo] = field(default_factory=list)
     specialty_id: Optional[str] = None
     doctor_name: Optional[str] = None
+    # Patient's preferred UI language (e.g. "hi"). When non-"en", the
+    # dynamic instructions prepend a CRITICAL instruction telling the LLM
+    # to respond in that language. Doctor handoffs are unaffected.
+    language: str = "en"
 
 
 # ── Context builder used both by the system prompt and the history tool ─
@@ -365,13 +370,23 @@ def _dynamic_instructions(
             "patient to re-upload."
         )
 
-    return (
+    base_prompt = (
         format_system_prompt(
             profile, report_summary, past_summary, specialty_id, doctor_name
         )
         + session_attachments_block
         + attachments_block
     )
+
+    # Prepend the language instruction when the patient picked a non-English
+    # language. This lets the same agent code drive every supported locale
+    # without rebuilding the prompt template per language.
+    code = normalize_language(getattr(base, "language", "en"))
+    if code != "en":
+        name = SUPPORTED_LANGUAGES.get(code, "English")
+        instruction = LANGUAGE_INSTRUCTION_TEMPLATE.format(language_name=name)
+        return f"{instruction}\n\n{base_prompt}"
+    return base_prompt
 
 
 def get_dr_medisense() -> Agent[ChatContext]:
@@ -457,6 +472,7 @@ async def generate_chat_reply(
     session_attachments: list[SessionAttachmentMemo] | None = None,
     specialty_id: Optional[str] = None,
     doctor_name: Optional[str] = None,
+    language: str = "en",
 ) -> str:
     """Run one turn through Medisense AI and return the assistant reply text."""
     attachments = attachments or []
@@ -471,6 +487,7 @@ async def generate_chat_reply(
         session_attachments=session_attachments,
         specialty_id=specialty_id,
         doctor_name=doctor_name,
+        language=normalize_language(language),
     )
     # Stash on the dataclass via private attrs — read by `_dynamic_instructions`.
     ctx._patient_name = profile["patient_name"]            # type: ignore[attr-defined]

@@ -4,9 +4,87 @@ Uses ReportLab.
 """
 import io
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ── Unicode font registration ────────────────────────────────────────────
+# ReportLab ships only Latin fonts (Helvetica, Times-Roman, Courier). For
+# Indic / Arabic scripts we have to register a TrueType font that contains
+# the relevant glyphs. We try, in order:
+#   1. A project-relative `backend/fonts/` directory (if you bundle fonts).
+#   2. Common system locations on Windows / macOS / Linux.
+# If nothing is found we keep using Helvetica — text in Devanagari, Bengali,
+# Tamil, etc. will then render as boxes, which is the same behaviour as
+# before this feature shipped. The localized header note is still emitted
+# so the patient can see the content was meant to be in their language.
+
+_UNICODE_FONT_NAME = "MediSenseUnicode"
+_UNICODE_FONT_REGISTERED: bool | None = None  # tri-state: None = not tried yet
+
+_FONT_CANDIDATES = [
+    # Project-relative bundle dir (preferred — guaranteed coverage).
+    Path(__file__).resolve().parent.parent / "fonts" / "NotoSans-Regular.ttf",
+    Path(__file__).resolve().parent.parent / "fonts" / "DejaVuSans.ttf",
+    # Linux
+    Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    # Windows
+    Path(r"C:\Windows\Fonts\NotoSans-Regular.ttf"),
+    Path(r"C:\Windows\Fonts\seguisym.ttf"),  # Segoe UI Symbol — best Windows fallback
+    Path(r"C:\Windows\Fonts\arial.ttf"),
+    # macOS
+    Path("/Library/Fonts/Arial Unicode.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+]
+
+
+def _ensure_unicode_font() -> str:
+    """Register a Unicode-capable TTF the first time we need one.
+
+    Returns the registered font name (which the PDF body styles can use)
+    or "Helvetica" if no candidate was found. Idempotent; safe to call
+    from multiple PDF generators.
+    """
+    global _UNICODE_FONT_REGISTERED
+    if _UNICODE_FONT_REGISTERED:
+        return _UNICODE_FONT_NAME
+    if _UNICODE_FONT_REGISTERED is False:
+        return "Helvetica"
+
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except Exception:
+        _UNICODE_FONT_REGISTERED = False
+        return "Helvetica"
+
+    for path in _FONT_CANDIDATES:
+        try:
+            if path.exists():
+                pdfmetrics.registerFont(TTFont(_UNICODE_FONT_NAME, str(path)))
+                logger.info(f"Registered Unicode PDF font from {path}")
+                _UNICODE_FONT_REGISTERED = True
+                return _UNICODE_FONT_NAME
+        except Exception as exc:
+            logger.debug(f"Skipping font candidate {path}: {exc}")
+            continue
+
+    logger.warning(
+        "No Unicode-capable TTF font found — non-English PDF text may render "
+        "as missing-glyph boxes. Drop a TTF (e.g. NotoSans-Regular.ttf) into "
+        "backend/fonts/ to fix this for production."
+    )
+    _UNICODE_FONT_REGISTERED = False
+    return "Helvetica"
+
+
+# RTL-script codes where ReportLab's left-to-right layout is known to be
+# imperfect. We still render the text but warn the patient on the PDF.
+_RTL_LANGUAGE_CODES = {"ur", "ar", "he", "fa"}
 
 # ── Colours & branding ─────────────────────────────────────────────────────
 BRAND_BLUE = (0.09, 0.35, 0.69)       # #1759B0
@@ -145,8 +223,18 @@ def generate_soap_pdf(soap_note: dict, patient_name: str = "Anonymous Patient",
         return b""
 
 
-def generate_patient_pdf(analysis: dict, patient_name: str = "Anonymous Patient") -> bytes:
-    """Generate a branded patient health guide PDF."""
+def generate_patient_pdf(
+    analysis: dict,
+    patient_name: str = "Anonymous Patient",
+    language: str = "en",
+) -> bytes:
+    """Generate a branded patient health guide PDF.
+
+    `language` is the ISO code for the patient's preferred language — when
+    it is not "en" we emit a top-of-document header note explaining that
+    the body content was generated in that language and (best-effort)
+    register a Unicode-capable TTF font so Indic / Arabic glyphs render.
+    """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -157,6 +245,20 @@ def generate_patient_pdf(analysis: dict, patient_name: str = "Anonymous Patient"
         )
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+        # Pull config inside the function so import-time failures don't
+        # take down PDF generation entirely.
+        try:
+            from config import SUPPORTED_LANGUAGES, normalize_language
+            lang_code = normalize_language(language)
+            lang_label = SUPPORTED_LANGUAGES.get(lang_code, "English")
+        except Exception:
+            lang_code = "en"
+            lang_label = "English"
+
+        body_font = "Helvetica"
+        if lang_code != "en":
+            body_font = _ensure_unicode_font()
 
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -174,7 +276,10 @@ def generate_patient_pdf(analysis: dict, patient_name: str = "Anonymous Patient"
                                           textColor=colors.white, fontSize=12,
                                           backColor=colors.HexColor("#1759B0"),
                                           borderPad=6, spaceAfter=6, spaceBefore=10)
-        body = ParagraphStyle("body", parent=styles["Normal"], fontSize=9, spaceAfter=3)
+        body = ParagraphStyle(
+            "body", parent=styles["Normal"], fontSize=9, spaceAfter=3,
+            fontName=body_font,
+        )
         bold_label = ParagraphStyle("bl", parent=styles["Normal"],
                                     fontSize=9, fontName="Helvetica-Bold",
                                     textColor=colors.HexColor("#1759B0"))
@@ -185,6 +290,27 @@ def generate_patient_pdf(analysis: dict, patient_name: str = "Anonymous Patient"
         elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1759B0")))
         elements.append(Spacer(1, 0.2*cm))
         elements.append(Paragraph(f"Prepared for: <b>{patient_name}</b>  |  Date: {datetime.now().strftime('%d %B %Y')}", body))
+
+        # Language note: surfaces what language the LLM was asked to use,
+        # plus a heads-up for RTL scripts where ReportLab's left-to-right
+        # layout can mis-render.
+        if lang_code != "en":
+            lang_note_style = ParagraphStyle(
+                "lang_note", parent=styles["Normal"],
+                fontSize=8.5, textColor=colors.HexColor("#1759B0"),
+                fontName=body_font, spaceBefore=4, spaceAfter=4,
+            )
+            note = (
+                f"Content generated in {lang_label} as per patient preference."
+            )
+            if lang_code in _RTL_LANGUAGE_CODES:
+                note += (
+                    " Note: this language is written right-to-left; PDF layout"
+                    " may not render perfectly — the in-app text and chatbot"
+                    " responses are authoritative."
+                )
+            elements.append(Paragraph(note, lang_note_style))
+
         elements.append(Spacer(1, 0.4*cm))
 
         # Tab 1: Summary

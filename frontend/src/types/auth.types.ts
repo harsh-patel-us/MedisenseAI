@@ -19,6 +19,13 @@ export interface AuthUser {
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;
   has_profile_pic?: boolean;
+  /** Patient UI/AI language. Always "en" for doctors. */
+  preferred_language: string;
+}
+
+export interface SupportedLanguage {
+  code: string;
+  label: string;
 }
 
 export interface AuthResponse {
@@ -34,6 +41,8 @@ export interface RegisterRequest {
   role: UserRole;
   /** Required when `role === 'doctor'`. */
   specialty?: string | null;
+  /** Patient UI/AI language. Defaults to 'en' on the server. */
+  preferred_language?: string | null;
 }
 
 export interface LoginRequest {

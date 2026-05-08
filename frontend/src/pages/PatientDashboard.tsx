@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { listDoctors } from '../api/patientChatbotApi';
 import type { DoctorCard } from '../types/patientChatbot.types';
 import { useNavigate } from 'react-router-dom';
+import LanguageSelector from '../components/LanguageSelector';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function PatientDashboard() {
   const [doctors, setDoctors] = useState<DoctorCard[]>([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const loadDoctors = useCallback(async () => {
     setDoctorsLoading(true);
@@ -27,18 +30,30 @@ export default function PatientDashboard() {
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 20px', width: '100%' }}>
       {/* Header */}
-      <div style={{ marginBottom: '40px' }}>
-        <h1 style={{
-          fontSize: '2.2rem', fontWeight: 900,
-          background: 'linear-gradient(135deg, #05aebb 0%, #4ade80 100%)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          marginBottom: '12px',
-        }}>
-          🧬 Specialist Directory
-        </h1>
-        <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', maxWidth: '600px', lineHeight: 1.6 }}>
-          Consult with our verified medical specialists. Select a doctor below to start a secure, AI-assisted health consultation.
-        </p>
+      <div
+        style={{
+          marginBottom: '40px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 24,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <h1 style={{
+            fontSize: '2.2rem', fontWeight: 900,
+            background: 'linear-gradient(135deg, #05aebb 0%, #4ade80 100%)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            marginBottom: '12px',
+          }}>
+            🧬 Specialist Directory
+          </h1>
+          <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', maxWidth: '600px', lineHeight: 1.6 }}>
+            Consult with our verified medical specialists. Select a doctor below to start a secure, AI-assisted health consultation.
+          </p>
+        </div>
+        {user?.role === 'patient' && <LanguageSelector />}
       </div>
 
       {/* Registered Specialists */}

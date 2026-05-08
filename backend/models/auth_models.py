@@ -17,6 +17,9 @@ class RegisterRequest(BaseModel):
     # Required for doctors — id from services.specialties (e.g. "cardiologist").
     # Ignored for patients.
     specialty: str | None = Field(default=None, max_length=80)
+    # Patient UI language preference. Validated against SUPPORTED_LANGUAGES on
+    # the server; invalid codes silently default to "en".
+    preferred_language: str | None = Field(default="en", max_length=8)
 
 
 class LoginRequest(BaseModel):
@@ -44,6 +47,13 @@ class UserPublic(BaseModel):
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
     has_profile_pic: bool = False
+    # Patient UI language. Always "en" for doctors.
+    preferred_language: str = "en"
+
+
+class UpdateLanguageRequest(BaseModel):
+    """Body for PATCH /auth/language."""
+    language_code: str = Field(..., min_length=2, max_length=8)
 
 
 class ProfileUpdateRequest(BaseModel):

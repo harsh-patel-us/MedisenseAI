@@ -608,6 +608,7 @@ async def send_message(
             session_attachments=session_memos,
             specialty_id=session.specialty,
             doctor_name=assigned_doctor_name,
+            language=getattr(user, "preferred_language", "en") or "en",
         )
     else:
         # Doctor is live — AI stays silent, the human will reply manually.

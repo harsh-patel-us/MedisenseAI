@@ -123,3 +123,32 @@ def get_settings() -> Settings:
 
 
 settings: Settings = get_settings()
+
+
+# ── Multilingual support ────────────────────────────────────────────────
+# Language codes the patient can pick. Keys are ISO-639-1 (or close to it);
+# values are the display labels surfaced in the UI and substituted into the
+# language instruction template before being sent to the LLM. This lives in
+# config.py rather than prompts/ because it is static reference data, not a
+# template — the actual instruction text is in prompts/language_instruction.txt.
+SUPPORTED_LANGUAGES: dict[str, str] = {
+    "en": "English",
+    "hi": "Hindi (हिंदी)",
+    "gu": "Gujarati (ગુજરાતી)",
+    "bn": "Bengali (বাংলা)",
+    "ta": "Tamil (தமிழ்)",
+    "te": "Telugu (తెలుగు)",
+    "mr": "Marathi (मराठी)",
+    "kn": "Kannada (ಕನ್ನಡ)",
+    "ml": "Malayalam (മലയാളം)",
+    "pa": "Punjabi (ਪੰਜਾਬੀ)",
+    "ur": "Urdu (اردو)",
+}
+
+
+def normalize_language(code: str | None) -> str:
+    """Coerce any input to a supported language code; default to 'en'."""
+    if not code:
+        return "en"
+    code = code.strip().lower()
+    return code if code in SUPPORTED_LANGUAGES else "en"

@@ -197,20 +197,28 @@ async def analyze_patient_report(
             ),
         )
 
+    # Patient's UI language drives all three AI calls. Defaults to English
+    # if the user record predates the multilingual feature.
+    patient_lang = getattr(_user, "preferred_language", "en") or "en"
+
     try:
         # Step 1: Extract findings
         logger.info(f"[{request.file_id}] Running report analysis...")
-        findings_data = await analyze_report(raw_text)
+        findings_data = await analyze_report(raw_text, language=patient_lang)
 
         # Step 2: Summary + specialists
         logger.info(f"[{request.file_id}] Generating summary and specialist routing...")
-        summary_data = await generate_summary_and_specialists(findings_data)
+        summary_data = await generate_summary_and_specialists(
+            findings_data, language=patient_lang
+        )
 
         # Step 3: Lifestyle guide
         conditions = findings_data.get("conditions_suggested", [])
         findings_summary = summary_data.get("plain_summary", "")
         logger.info(f"[{request.file_id}] Generating lifestyle guide...")
-        lifestyle_data = await generate_lifestyle_guide(conditions, findings_summary)
+        lifestyle_data = await generate_lifestyle_guide(
+            conditions, findings_summary, language=patient_lang
+        )
 
         # Snapshot alerts already on file BEFORE we kick off the background
         # extraction so the response includes the patient's most recent
@@ -286,7 +294,11 @@ async def export_patient_pdf(
 
     actual_patient_name = _user.full_name if _user and getattr(_user, "full_name", None) else (request.patient_name or "Patient")
 
-    pdf_bytes = generate_patient_pdf(analysis_dict, patient_name=actual_patient_name)
+    pdf_bytes = generate_patient_pdf(
+        analysis_dict,
+        patient_name=actual_patient_name,
+        language=getattr(_user, "preferred_language", "en") or "en",
+    )
 
     if not pdf_bytes:
         raise HTTPException(status_code=500, detail="PDF generation failed. Ensure reportlab is installed.")

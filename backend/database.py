@@ -106,6 +106,11 @@ class User(Base):
     emergency_contact_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # Patient-facing UI language. Doctors keep English on the SOAP-note
+    # workflow regardless of this field; it only steers patient-side AI
+    # output (chatbot replies, report analysis, lifestyle guide, PDFs).
+    preferred_language: Mapped[str] = mapped_column(String, default="en")
+
     # ── Google Calendar OAuth ────────────────────────────────────────────
     # Populated when the user connects their Google account on the schedule
     # page. Used to insert calendar events (with Google Meet links) on their
@@ -526,6 +531,7 @@ async def init_db():
                 ("address", "TEXT"),
                 ("emergency_contact_name", "VARCHAR"),
                 ("emergency_contact_phone", "VARCHAR"),
+                ("preferred_language", "VARCHAR DEFAULT 'en'"),
             ],
         }
 

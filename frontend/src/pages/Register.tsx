@@ -3,7 +3,8 @@ import type { FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserRole } from '../types/auth.types';
-import { listPublicSpecialties, type SpecialtyOption } from '../api/authApi';
+import { listPublicSpecialties, listSupportedLanguages, type SpecialtyOption } from '../api/authApi';
+import type { SupportedLanguage } from '../types/auth.types';
 
 interface LocationState {
   prefillRole?: UserRole;
@@ -22,6 +23,8 @@ export default function Register() {
   const [confirm, setConfirm] = useState('');
   const [specialty, setSpecialty] = useState('');
   const [specialties, setSpecialties] = useState<SpecialtyOption[]>([]);
+  const [language, setLanguage] = useState('en');
+  const [languages, setLanguages] = useState<SupportedLanguage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,6 +33,9 @@ export default function Register() {
     listPublicSpecialties()
       .then((items) => { if (alive) setSpecialties(items); })
       .catch(() => { /* non-fatal — patients don't need it */ });
+    listSupportedLanguages()
+      .then((items) => { if (alive) setLanguages(items); })
+      .catch(() => { /* non-fatal — defaults to English on the server */ });
     return () => { alive = false; };
   }, []);
 
@@ -63,6 +69,7 @@ export default function Register() {
           password,
           role,
           specialty: role === 'doctor' ? specialty : null,
+          preferred_language: role === 'patient' ? language : 'en',
         }),
         new Promise(resolve => setTimeout(resolve, 1000))
       ]);
@@ -126,6 +133,13 @@ export default function Register() {
               value={specialty}
               onChange={setSpecialty}
               options={specialties}
+            />
+          )}
+          {role === 'patient' && (
+            <LanguageField
+              value={language}
+              onChange={setLanguage}
+              options={languages}
             />
           )}
           <Field
@@ -265,6 +279,60 @@ function SpecialtySelect({
     </label>
   );
 }
+
+function LanguageField({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: SupportedLanguage[];
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span
+        style={{
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          color: 'var(--text-secondary)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+        }}
+      >
+        🌐 Preferred language
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          padding: '11px 14px',
+          borderRadius: 10,
+          background: 'rgba(6,13,27,0.6)',
+          border: '1px solid var(--border-subtle)',
+          color: 'var(--text-primary)',
+          fontSize: '0.92rem',
+          outline: 'none',
+        }}
+      >
+        {options.length === 0 ? (
+          <option value="en">English</option>
+        ) : (
+          options.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.label}
+            </option>
+          ))
+        )}
+      </select>
+      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+        AI summaries, chatbot replies, and PDF guides will be generated in
+        this language. You can change this later in your dashboard.
+      </span>
+    </label>
+  );
+}
+
 
 function Field({
   label, type, value, onChange, placeholder, required,

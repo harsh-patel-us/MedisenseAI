@@ -11,11 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Respons
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import SUPPORTED_LANGUAGES, normalize_language
 from database import User, get_db
 from models.auth_models import (
     AuthResponse,
     LoginRequest,
     RegisterRequest,
+    UpdateLanguageRequest,
     UpdateSpecialtyRequest,
     UserPublic,
     ProfileUpdateRequest,
@@ -51,6 +53,7 @@ def _to_public(user: User) -> UserPublic:
         emergency_contact_name=user.emergency_contact_name,
         emergency_contact_phone=user.emergency_contact_phone,
         has_profile_pic=user.profile_pic_data is not None,
+        preferred_language=normalize_language(getattr(user, "preferred_language", "en")),
     )
 
 
@@ -78,6 +81,11 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             )
         specialty = body.specialty
 
+    # Patient UI language. Doctors are pinned to English regardless of input.
+    language = "en"
+    if body.role == "patient":
+        language = normalize_language(body.preferred_language)
+
     user = User(
         id=generate_id(),
         email=email,
@@ -85,6 +93,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         full_name=body.full_name.strip(),
         role=body.role,
         specialty=specialty,
+        preferred_language=language,
     )
     db.add(user)
     await db.commit()
@@ -116,6 +125,35 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: User = Depends(get_current_user)):
+    return _to_public(user)
+
+
+@router.get("/languages")
+async def list_supported_languages():
+    """Public — drives the language picker on the registration page."""
+    return {
+        "languages": [
+            {"code": code, "label": label}
+            for code, label in SUPPORTED_LANGUAGES.items()
+        ]
+    }
+
+
+@router.patch("/language", response_model=UserPublic)
+async def update_language(
+    body: UpdateLanguageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update the patient's UI/AI language. Invalid codes silently default
+    to English. No-op on doctor accounts (their flow stays English)."""
+    if user.role == "doctor":
+        # Doctor SOAP workflow is always English; we accept the call but
+        # do not change anything to avoid surprising downstream callers.
+        return _to_public(user)
+    user.preferred_language = normalize_language(body.language_code)
+    await db.commit()
+    await db.refresh(user)
     return _to_public(user)
 
 

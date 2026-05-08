@@ -4,6 +4,7 @@ import type {
   AuthUser,
   LoginRequest,
   RegisterRequest,
+  SupportedLanguage,
 } from '../types/auth.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -81,6 +82,23 @@ export async function updateMySpecialty(specialty: string): Promise<AuthUser> {
     specialty,
   });
   return data;
+}
+
+/** PATCH the patient's preferred language. Server silently coerces invalid
+ *  codes to "en". */
+export async function updateLanguage(languageCode: string): Promise<AuthUser> {
+  const { data } = await axios.patch<AuthUser>(`${API_BASE}/auth/language`, {
+    language_code: languageCode,
+  });
+  return data;
+}
+
+/** Public — drives the language picker on registration and the dashboard. */
+export async function listSupportedLanguages(): Promise<SupportedLanguage[]> {
+  const { data } = await axios.get<{ languages: SupportedLanguage[] }>(
+    `${API_BASE}/auth/languages`,
+  );
+  return data.languages;
 }
 
 export async function updateProfile(body: Partial<AuthUser>): Promise<AuthUser> {
