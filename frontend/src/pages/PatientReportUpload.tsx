@@ -6,6 +6,7 @@ import SpecialistGuide from '../components/patient/SpecialistGuide';
 import DietExercisePlan from '../components/patient/DietExercisePlan';
 import PrecautionsList from '../components/patient/PrecautionsList';
 import MedicationTracker from '../components/patient/MedicationTracker';
+import LabTrendChart from '../components/patient/LabTrendChart';
 import { useAuth } from '../contexts/AuthContext';
 import {
   uploadReport,
@@ -23,7 +24,13 @@ import type {
   UrgencyLevel,
 } from '../types/patient.types';
 
-type TabKey = 'summary' | 'specialist' | 'diet' | 'precautions' | 'medications';
+type TabKey =
+  | 'summary'
+  | 'specialist'
+  | 'diet'
+  | 'precautions'
+  | 'medications'
+  | 'trends';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'summary', label: 'Report Summary', icon: '📋' },
@@ -31,6 +38,7 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'diet', label: 'Diet & Exercise', icon: '🥗' },
   { key: 'precautions', label: 'Precautions', icon: '⚠️' },
   { key: 'medications', label: 'Medications', icon: '💊' },
+  { key: 'trends', label: 'Trends', icon: '📈' },
 ];
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -335,6 +343,9 @@ export default function PatientReportUpload() {
               )}
               {activeTab === 'medications' && user?.id && (
                 <MedicationTracker patientId={user.id} />
+              )}
+              {activeTab === 'trends' && user?.id && (
+                <LabTrendChart patientId={user.id} />
               )}
             </div>
 

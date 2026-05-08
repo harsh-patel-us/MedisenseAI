@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type {
+  BiomarkerTrendResponse,
   UploadResponse,
   PatientAnalysis,
   HistoryListResponse,
@@ -84,4 +85,13 @@ export async function downloadHistoryPdf(recordId: string): Promise<Blob> {
     { responseType: 'blob' },
   );
   return response.data;
+}
+
+export async function getBiomarkerTrends(
+  patientId: string,
+): Promise<BiomarkerTrendResponse> {
+  const { data } = await axios.get<BiomarkerTrendResponse>(
+    `${API_BASE}/patient/${encodeURIComponent(patientId)}/biomarker-trends`,
+  );
+  return data;
 }

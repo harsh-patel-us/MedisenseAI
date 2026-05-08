@@ -128,6 +128,40 @@ class HistoryListResponse(BaseModel):
     items: List[HistoryItem] = []
 
 
+class BiomarkerReading(BaseModel):
+    """One quantitative reading for a single biomarker on a single report."""
+    id: str
+    biomarker_name: str
+    value: float
+    unit: str = ""
+    reference_min: Optional[float] = None
+    reference_max: Optional[float] = None
+    status: str = "normal"  # "normal" | "low" | "high" | "critical"
+    report_date: Optional[str] = None
+    created_at: Optional[str] = None
+    analysis_record_id: Optional[str] = None
+
+
+class BiomarkerTrend(BaseModel):
+    """Time-series of one biomarker for a patient, plus trend metadata."""
+    biomarker_name: str
+    unit: str = ""
+    reference_min: Optional[float] = None
+    reference_max: Optional[float] = None
+    latest_value: Optional[float] = None
+    previous_value: Optional[float] = None
+    latest_status: str = "normal"
+    # "improving" | "worsening" | "stable" | "new"
+    trend: str = "new"
+    percent_change: Optional[float] = None
+    history: List[BiomarkerReading] = []
+
+
+class BiomarkerTrendResponse(BaseModel):
+    patient_id: str
+    biomarkers: List[BiomarkerTrend] = []
+
+
 class HistoryDetail(BaseModel):
     """Full payload for a single past analysis — drives the re-render."""
     id: str

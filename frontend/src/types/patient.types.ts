@@ -105,3 +105,48 @@ export interface HistoryDetail {
   has_generated_pdf: boolean;
   generated_pdf_size: number | null;
 }
+
+// ── Lab biomarker trends ─────────────────────────────────────────────
+
+export type BiomarkerStatus = 'normal' | 'low' | 'high' | 'critical' | string;
+export type BiomarkerTrendDirection =
+  | 'improving'
+  | 'worsening'
+  | 'stable'
+  | 'new'
+  | string;
+
+export interface BiomarkerReading {
+  id: string;
+  biomarker_name: string;
+  value: number;
+  unit: string;
+  reference_min: number | null;
+  reference_max: number | null;
+  status: BiomarkerStatus;
+  report_date: string | null;
+  created_at: string | null;
+  analysis_record_id: string | null;
+}
+
+export interface BiomarkerTrend {
+  biomarker_name: string;
+  unit: string;
+  reference_min: number | null;
+  reference_max: number | null;
+  latest_value: number | null;
+  previous_value: number | null;
+  latest_status: BiomarkerStatus;
+  trend: BiomarkerTrendDirection;
+  percent_change: number | null;
+  history: BiomarkerReading[];
+}
+
+export interface BiomarkerTrendResponse {
+  patient_id: string;
+  biomarkers: BiomarkerTrend[];
+}
+
+export interface LabTrendChartProps {
+  patientId: string;
+}

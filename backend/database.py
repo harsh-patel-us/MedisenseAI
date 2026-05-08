@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped
-from sqlalchemy import Index, Text, String, DateTime, ForeignKey, Integer, LargeBinary, func
+from sqlalchemy import Float, Index, Text, String, DateTime, ForeignKey, Integer, LargeBinary, func
 from typing import Optional
 
 from config import settings
@@ -431,6 +431,46 @@ class MedicationInteractionAlert(Base):
             "ix_medication_alerts_patient_dismissed",
             "patient_id",
             "is_dismissed",
+        ),
+    )
+
+
+class LabBiomarker(Base):
+    """One quantitative biomarker reading extracted from a lab report.
+
+    Multiple rows per analysis are normal — a single CBC produces a dozen
+    readings. The (`patient_id`, `biomarker_name`, `report_date`) tuple is
+    what the trends endpoint groups on, so we keep `biomarker_name`
+    canonical (e.g. "HbA1c", not "A1C" / "Glycated Haemoglobin"); the
+    extraction prompt is responsible for that normalization.
+    """
+    __tablename__ = "lab_biomarkers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    patient_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    analysis_record_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("patient_analyses.id"), nullable=True, index=True
+    )
+    biomarker_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reference_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    reference_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # "normal" | "low" | "high" | "critical"
+    status: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    # ISO-ish date string. Free text so we can store relative phrases the
+    # report uses ("collected on 2026-04-12") without losing data.
+    report_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_lab_biomarkers_patient_name_date",
+            "patient_id",
+            "biomarker_name",
+            "report_date",
         ),
     )
 

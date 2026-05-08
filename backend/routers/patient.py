@@ -23,6 +23,9 @@ from config import settings
 from models.patient_models import (
     UploadResponse,
     AnalyzeRequest,
+    BiomarkerReading,
+    BiomarkerTrend,
+    BiomarkerTrendResponse,
     MedicationAlert,
     PatientAnalysis,
     ExportPdfRequest,
@@ -33,6 +36,10 @@ from models.patient_models import (
 from services import claude_service as claude_service_module
 from services.report_parser import parse_uploaded_file, looks_like_extraction_failure
 from services.claude_service import analyze_report, generate_summary_and_specialists, generate_lifestyle_guide
+from services.biomarker_service import (
+    extract_biomarkers,
+    get_patient_biomarker_trends,
+)
 from services.medication_service import (
     extract_medications_from_text,
     run_interaction_check,
@@ -273,6 +280,19 @@ async def analyze_patient_report(
         # call from the medication tracker UI.
         asyncio.create_task(_extract_and_check_meds_bg(_user.id, raw_text))
 
+        # Same pattern for the lab biomarker timeline. Newly-extracted
+        # readings appear under GET /patient/{id}/biomarker-trends once
+        # the background task lands.
+        asyncio.create_task(
+            extract_biomarkers(
+                raw_text=raw_text,
+                analysis_record_id=request.file_id,
+                patient_id=_user.id,
+                claude_service=claude_service_module,
+                db=None,
+            )
+        )
+
         return analysis
 
     except Exception as e:
@@ -467,4 +487,54 @@ async def download_history_pdf(
             "Content-Disposition": f'attachment; filename="medisense_health_guide_{record_id}.pdf"',
             "Content-Length": str(len(record.generated_pdf_data)),
         },
+    )
+
+
+# ── Lab biomarker trends ──────────────────────────────────────────────────
+
+
+@router.get(
+    "/{patient_id}/biomarker-trends",
+    response_model=BiomarkerTrendResponse,
+)
+async def get_biomarker_trends(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Group every biomarker reading the patient has on file by canonical
+    name and return a per-biomarker trend block (latest, previous, %
+    change, direction, full history) ready for the trends chart."""
+    if patient_id != _user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    grouped = await get_patient_biomarker_trends(patient_id, db)
+
+    # Stable order: most-recently-updated biomarker first so the dashboard
+    # opens to whatever the patient just uploaded.
+    def _latest_iso(entry: dict) -> str:
+        if entry["history"]:
+            last = entry["history"][-1]
+            return last.get("report_date") or last.get("created_at") or ""
+        return ""
+
+    sorted_entries = sorted(grouped.values(), key=_latest_iso, reverse=True)
+
+    return BiomarkerTrendResponse(
+        patient_id=patient_id,
+        biomarkers=[
+            BiomarkerTrend(
+                biomarker_name=entry["biomarker_name"],
+                unit=entry["unit"] or "",
+                reference_min=entry["reference_min"],
+                reference_max=entry["reference_max"],
+                latest_value=entry["latest_value"],
+                previous_value=entry["previous_value"],
+                latest_status=entry["latest_status"],
+                trend=entry["trend"],
+                percent_change=entry["percent_change"],
+                history=[BiomarkerReading(**r) for r in entry["history"]],
+            )
+            for entry in sorted_entries
+        ],
     )
