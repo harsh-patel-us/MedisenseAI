@@ -435,6 +435,42 @@ class MedicationInteractionAlert(Base):
     )
 
 
+class FollowUpPlan(Base):
+    """Patient-facing follow-up extracted from a SOAP note's Plan section.
+
+    Created automatically as a background task after every SOAP note is
+    persisted (both audio-upload and Meet-transcript flows). Doctors can
+    download a patient-friendly PDF and optionally push a copy into the
+    patient's Dr. MediSense chat history.
+    """
+    __tablename__ = "followup_plans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    consultation_session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("consultation_sessions.id"), nullable=False, index=True
+    )
+    # Best-effort link to the patient's user account. NULL when the doctor
+    # uploaded audio for an offline patient — in that case the "Send to
+    # Patient Chat" path is disabled by the UI and the API.
+    patient_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
+    # Free-text date or relative phrase ("In 6 weeks", "2026-08-15").
+    follow_up_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    follow_up_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # JSON list of strings.
+    monitoring_items: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    warning_signs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dietary_restrictions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    activity_restrictions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # JSON list of {drug, dose, frequency} objects.
+    medications_to_start: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    follow_up_specialist: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    patient_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_sent_to_patient: Mapped[bool] = mapped_column(Integer, default=False)
+
+
 class PatientChatAudit(Base):
     """Append-only audit trail for every patient-chat API access."""
     __tablename__ = "patient_chat_audit"

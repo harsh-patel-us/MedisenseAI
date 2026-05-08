@@ -18,6 +18,7 @@ from datetime import datetime
 from config import settings
 from models.doctor_models import (
     AuditIssue, SoapAuditResponse,
+    FollowUpMedication, FollowUpPlanResponse,
     TranscriptSegment, UploadAudioResponse,
     DoctorChatActiveSession, DoctorChatListItem, DoctorChatListResponse,
     DoctorChatMessageRequest,
@@ -36,11 +37,18 @@ from services.claude_service import generate_soap_note
 from services.chat_ws import chat_manager
 from services.pdf_export import generate_soap_pdf
 from services.auth_service import require_role
+from services.followup_service import (
+    extract_followup_from_soap,
+    generate_followup_pdf,
+    parse_followup_record,
+    resolve_patient_id,
+    send_followup_to_patient_chat,
+)
 from services.soap_audit_service import audit_soap_note, parse_persisted_audit
 from services.specialties import specialty_name
 from utils.helpers import generate_id, format_transcript_for_prompt, validate_file_size
 from utils.storage import save_soap_pdf
-from database import get_db, ConsultationSession, DoctorChatSession, User, PatientChatSession, PatientChatMessage
+from database import get_db, ConsultationSession, DoctorChatSession, FollowUpPlan, User, PatientChatSession, PatientChatMessage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/doctor", tags=["doctor"])
@@ -301,6 +309,19 @@ async def generate_note(
         )
     )
 
+    # Same pattern for the patient-facing follow-up plan. Audio uploads
+    # don't usually carry a linked patient_id, so we leave it null here —
+    # it can be resolved later from patient_email when one becomes known.
+    asyncio.create_task(
+        extract_followup_from_soap(
+            soap_note=soap_dict,
+            session_id=request.session_id,
+            patient_id=None,
+            claude_service=claude_service_module,
+            db=None,
+        )
+    )
+
     return GenerateNoteResponse(
         soap_note=soap_note,
         entities=entities,
@@ -353,6 +374,153 @@ async def get_session_audit(
         positive_findings=list(audit.get("positive_findings") or []),
         reviewer_summary=str(audit.get("reviewer_summary") or ""),
     )
+
+
+# ── Follow-up plan ───────────────────────────────────────────────────────
+
+
+async def _load_followup_for_doctor(
+    session_id: str, doctor_id: str, db: AsyncSession
+) -> tuple[ConsultationSession, FollowUpPlan | None]:
+    """Look up the consultation row (scoped to the calling doctor) and the
+    follow-up plan for that session, if one has been extracted yet."""
+    consultation = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.id == session_id,
+                ConsultationSession.doctor_id == doctor_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if consultation is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    plan = (
+        await db.execute(
+            select(FollowUpPlan).where(
+                FollowUpPlan.consultation_session_id == session_id
+            )
+        )
+    ).scalar_one_or_none()
+    return consultation, plan
+
+
+@router.get(
+    "/sessions/{session_id}/followup",
+    response_model=FollowUpPlanResponse,
+)
+async def get_session_followup(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Return the patient-facing follow-up plan for a consultation.
+
+    Returns 200 with `status="pending"` while the background extractor is
+    still running and a fully-populated payload once it has landed."""
+    _consultation, plan = await _load_followup_for_doctor(session_id, _user.id, db)
+    if plan is None:
+        return FollowUpPlanResponse(
+            status="pending", consultation_session_id=session_id,
+        )
+
+    data = parse_followup_record(plan)
+    return FollowUpPlanResponse(
+        status="complete",
+        id=data["id"],
+        consultation_session_id=data["consultation_session_id"],
+        patient_id=data["patient_id"],
+        follow_up_date=data["follow_up_date"],
+        follow_up_reason=data["follow_up_reason"],
+        monitoring_items=data["monitoring_items"],
+        warning_signs=data["warning_signs"],
+        dietary_restrictions=data["dietary_restrictions"],
+        activity_restrictions=data["activity_restrictions"],
+        medications_to_start=[
+            FollowUpMedication(
+                drug=str(m.get("drug", "")),
+                dose=str(m.get("dose", "")),
+                frequency=str(m.get("frequency", "")),
+            )
+            for m in data["medications_to_start"]
+        ],
+        follow_up_specialist=data["follow_up_specialist"],
+        patient_instructions=data["patient_instructions"],
+        is_sent_to_patient=data["is_sent_to_patient"],
+        created_at=data["created_at"],
+    )
+
+
+@router.post("/sessions/{session_id}/followup/pdf")
+async def export_followup_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Generate (on demand) and return the patient follow-up PDF."""
+    consultation, plan = await _load_followup_for_doctor(session_id, _user.id, db)
+    if plan is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Follow-up plan is still being generated. Try again shortly.",
+        )
+
+    patient_name = consultation.patient_name or "Patient"
+    pdf_bytes = generate_followup_pdf(plan, patient_name=patient_name)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="PDF generation failed")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="medisense_followup_plan.pdf"'
+            ),
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@router.post("/sessions/{session_id}/followup/send-to-patient")
+async def push_followup_to_patient(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("doctor")),
+):
+    """Append the follow-up summary to the patient's Dr. MediSense chat.
+
+    Resolves the patient's user.id either from the stored FollowUpPlan or
+    from the consultation's `patient_email` field. Returns 409 when no
+    patient account can be associated with this session."""
+    _consultation, plan = await _load_followup_for_doctor(session_id, _user.id, db)
+    if plan is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Follow-up plan is still being generated. Try again shortly.",
+        )
+
+    patient_id = plan.patient_id or await resolve_patient_id(session_id, db)
+    if not patient_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This consultation has no linked patient account. "
+                "Send the PDF instead, or link a patient first."
+            ),
+        )
+
+    if plan.patient_id != patient_id:
+        plan.patient_id = patient_id
+        await db.commit()
+        await db.refresh(plan)
+
+    msg = await send_followup_to_patient_chat(plan, patient_id, db)
+    return {
+        "ok": msg is not None,
+        "session_id": session_id,
+        "patient_id": patient_id,
+        "is_sent_to_patient": True,
+    }
 
 
 @router.post("/export-pdf")

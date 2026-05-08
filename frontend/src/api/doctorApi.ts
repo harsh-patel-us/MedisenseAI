@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type {
+  FollowUpPlan,
   GenerateNoteResponse,
   SessionInfo,
   SoapAuditResponse,
@@ -67,6 +68,41 @@ export async function getSessions(): Promise<SessionInfo[]> {
   const response = await axios.get<SessionInfo[]>(`${API_BASE}/doctor/sessions`);
   return response.data;
 }
+
+/** Fetch the patient-facing follow-up plan for a session. The backend
+ *  returns `status: "pending"` while the background extractor is still
+ *  running and the populated payload once it has landed. */
+export async function getFollowUpPlan(sessionId: string): Promise<FollowUpPlan> {
+  const { data } = await axios.get<FollowUpPlan>(
+    `${API_BASE}/doctor/sessions/${encodeURIComponent(sessionId)}/followup`,
+  );
+  return data;
+}
+
+/** Render the follow-up plan as a patient-facing PDF and return its bytes. */
+export async function downloadFollowUpPdf(sessionId: string): Promise<Blob> {
+  const response = await axios.post(
+    `${API_BASE}/doctor/sessions/${encodeURIComponent(sessionId)}/followup/pdf`,
+    null,
+    { responseType: 'blob' },
+  );
+  return response.data;
+}
+
+/** Append the follow-up summary to the patient's Dr. MediSense chat. */
+export async function sendFollowUpToPatient(
+  sessionId: string,
+): Promise<{ ok: boolean; patient_id: string; is_sent_to_patient: boolean }> {
+  const { data } = await axios.post<{
+    ok: boolean;
+    patient_id: string;
+    is_sent_to_patient: boolean;
+  }>(
+    `${API_BASE}/doctor/sessions/${encodeURIComponent(sessionId)}/followup/send-to-patient`,
+  );
+  return data;
+}
+
 
 /** Fetch the second-opinion audit for a session.
  *

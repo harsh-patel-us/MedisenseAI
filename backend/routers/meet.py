@@ -43,6 +43,11 @@ from services.claude_service import (
     generate_patient_explanation,
     generate_soap_note,
 )
+from services import claude_service as _claude_service_module
+from services.followup_service import (
+    extract_followup_from_soap,
+    resolve_patient_id,
+)
 from services.google_calendar import (
     CalendarEventResult,
     _platform_credentials,
@@ -688,6 +693,27 @@ async def _run_meet_pipeline(task_id: str, session_id: str, conference_id: str) 
             row.status = "completed"
             row.processing_status = "completed"
             await db.commit()
+
+            # Resolve a linked patient_id from the consultation's
+            # patient_email (best-effort) so the follow-up plan can later
+            # be pushed into that patient's chat history.
+            try:
+                resolved_patient_id = await resolve_patient_id(session_id, db)
+            except Exception:
+                resolved_patient_id = None
+
+            # Fire-and-forget patient follow-up plan extraction. Mirrors
+            # the audio-upload path in routers/doctor.py so every SOAP
+            # note (audio or Meet) gets a follow-up card automatically.
+            asyncio.create_task(
+                extract_followup_from_soap(
+                    soap_note=soap,
+                    session_id=session_id,
+                    patient_id=resolved_patient_id,
+                    claude_service=_claude_service_module,
+                    db=None,
+                )
+            )
 
             task.status = "completed"
             task.detail = "Done."

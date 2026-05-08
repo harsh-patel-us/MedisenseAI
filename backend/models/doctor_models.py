@@ -98,6 +98,37 @@ class AuditIssue(BaseModel):
     priority: str  # "high" | "medium" | "low"
 
 
+class FollowUpMedication(BaseModel):
+    """One medication line on the patient-facing follow-up card."""
+    drug: str = ""
+    dose: str = ""
+    frequency: str = ""
+
+
+class FollowUpPlanResponse(BaseModel):
+    """Patient-facing follow-up plan extracted from a SOAP note's Plan.
+
+    `status` is "complete" once the background extraction has landed, or
+    "pending" while the task is still running. Doctors poll the GET
+    endpoint until `status == "complete"`.
+    """
+    status: str = "complete"
+    id: Optional[str] = None
+    consultation_session_id: Optional[str] = None
+    patient_id: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    follow_up_reason: str = ""
+    monitoring_items: List[str] = []
+    warning_signs: List[str] = []
+    dietary_restrictions: List[str] = []
+    activity_restrictions: List[str] = []
+    medications_to_start: List[FollowUpMedication] = []
+    follow_up_specialist: Optional[str] = None
+    patient_instructions: str = ""
+    is_sent_to_patient: bool = False
+    created_at: Optional[str] = None
+
+
 class SoapAuditResponse(BaseModel):
     """Audit report for a SOAP note. `status` is "complete" once the audit
     task has finished and "pending" while it is still running. Frontend

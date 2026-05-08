@@ -10,6 +10,7 @@ import AudioFileUpload from '../components/doctor/AudioFileUpload';
 import TranscriptView from '../components/doctor/TranscriptView';
 import SoapNoteEditor from '../components/doctor/SoapNoteEditor';
 import SoapAuditPanel from '../components/doctor/SoapAuditPanel';
+import FollowUpCard from '../components/doctor/FollowUpCard';
 import { generateNote } from '../api/doctorApi';
 import {
   listUnprocessedSessions,
@@ -330,6 +331,7 @@ export default function DoctorDashboard() {
                 onUpdate={setSoapNote}
               />
               {sessionId && <SoapAuditPanel sessionId={sessionId} />}
+              {sessionId && <FollowUpCard sessionId={sessionId} />}
             </>
           ) : (
             <div className="glass-card" style={{
@@ -596,6 +598,7 @@ export default function DoctorDashboard() {
               onUpdate={setMeetSoapNote}
             />
             {meetSessionId && <SoapAuditPanel sessionId={meetSessionId} />}
+            {meetSessionId && <FollowUpCard sessionId={meetSessionId} />}
           </div>
         )}
       </div>

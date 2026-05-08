@@ -95,3 +95,31 @@ export interface SoapAuditResponse {
   positive_findings: string[];
   reviewer_summary: string;
 }
+
+// ── Follow-up plan ───────────────────────────────────────────────────
+
+export type FollowUpStatus = 'pending' | 'complete' | string;
+
+export interface FollowUpMedication {
+  drug: string;
+  dose: string;
+  frequency: string;
+}
+
+export interface FollowUpPlan {
+  status: FollowUpStatus;
+  id: string | null;
+  consultation_session_id: string | null;
+  patient_id: string | null;
+  follow_up_date: string | null;
+  follow_up_reason: string;
+  monitoring_items: string[];
+  warning_signs: string[];
+  dietary_restrictions: string[];
+  activity_restrictions: string[];
+  medications_to_start: FollowUpMedication[];
+  follow_up_specialist: string | null;
+  patient_instructions: string;
+  is_sent_to_patient: boolean;
+  created_at: string | null;
+}
