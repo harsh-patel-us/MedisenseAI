@@ -87,7 +87,7 @@ export default function PatientDashboard() {
 
         {doctorsLoading ? (
           <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
-            <div className="spinner" style={{ margin: '0 auto 16px' }} />
+            <div className="spinner" style={{ margin: '0 auto 16px' }} /> &nbsp;
             Loading specialists...
           </div>
         ) : doctors.length === 0 ? (
@@ -105,117 +105,116 @@ export default function PatientDashboard() {
               const anotherCardNavigating =
                 navigatingId !== null && navigatingId !== doc.id;
               return (
-              <div
-                key={doc.id}
-                onClick={() => !navigatingId && handleSelectDoctor(doc.id)}
-                style={{
-                  padding: '24px',
-                  background: isThisCardNavigating
-                    ? 'rgba(5,174,187,0.14)'
-                    : 'rgba(6,13,27,0.45)',
-                  border: `1px solid ${
-                    isThisCardNavigating
+                <div
+                  key={doc.id}
+                  onClick={() => !navigatingId && handleSelectDoctor(doc.id)}
+                  style={{
+                    padding: '24px',
+                    background: isThisCardNavigating
+                      ? 'rgba(5,174,187,0.14)'
+                      : 'rgba(6,13,27,0.45)',
+                    border: `1px solid ${isThisCardNavigating
                       ? '#05aebb'
                       : 'var(--border-subtle)'
-                  }`,
-                  borderRadius: '20px',
-                  cursor: navigatingId ? 'wait' : 'pointer',
-                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  opacity: anotherCardNavigating ? 0.45 : 1,
-                  pointerEvents: navigatingId ? 'none' : 'auto',
-                }}
-                onMouseEnter={(e) => {
-                  if (navigatingId) return;
-                  e.currentTarget.style.borderColor = '#05aebb';
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.background = 'rgba(5,174,187,0.1)';
-                  e.currentTarget.style.boxShadow = '0 12px 24px rgba(5,174,187,0.15)';
-                }}
-                onMouseLeave={(e) => {
-                  if (navigatingId) return;
-                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.background = 'rgba(6,13,27,0.45)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <div style={{ 
-                  width: 56, height: 56, borderRadius: '16px',
-                  background: 'rgba(5,174,187,0.1)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '2.2rem', marginBottom: '8px',
-                  border: '1px solid rgba(5,174,187,0.2)'
-                }}>
-                  {doc.specialty === 'cardiologist' ? '❤️' :
-                   doc.specialty === 'neurologist' ? '🧠' :
-                   doc.specialty === 'pediatrician' ? '🧒' :
-                   doc.specialty === 'dermatologist' ? '🧴' : '🩺'}
-                </div>
-                
-                <div>
-                  <div style={{ 
-                    fontWeight: 800, 
-                    fontSize: '1.15rem', 
-                    color: 'var(--text-primary)',
-                    marginBottom: '4px'
+                      }`,
+                    borderRadius: '20px',
+                    cursor: navigatingId ? 'wait' : 'pointer',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    opacity: anotherCardNavigating ? 0.45 : 1,
+                    pointerEvents: navigatingId ? 'none' : 'auto',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (navigatingId) return;
+                    e.currentTarget.style.borderColor = '#05aebb';
+                    e.currentTarget.style.transform = 'translateY(-4px)';
+                    e.currentTarget.style.background = 'rgba(5,174,187,0.1)';
+                    e.currentTarget.style.boxShadow = '0 12px 24px rgba(5,174,187,0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (navigatingId) return;
+                    e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.background = 'rgba(6,13,27,0.45)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <div style={{
+                    width: 56, height: 56, borderRadius: '16px',
+                    background: 'rgba(5,174,187,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '2.2rem', marginBottom: '8px',
+                    border: '1px solid rgba(5,174,187,0.2)'
                   }}>
-                    {doc.full_name}
+                    {doc.specialty === 'cardiologist' ? '❤️' :
+                      doc.specialty === 'neurologist' ? '🧠' :
+                        doc.specialty === 'pediatrician' ? '🧒' :
+                          doc.specialty === 'dermatologist' ? '🧴' : '🩺'}
                   </div>
-                  <div style={{ 
-                    fontSize: '0.85rem', 
-                    color: '#05aebb', 
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    {doc.specialty_name || doc.specialty || 'General Physician'}
-                  </div>
-                </div>
 
-                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  Verified medical professional available for consultations and diagnostic review.
-                </p>
-
-                <div style={{ marginTop: 'auto', paddingTop: '12px' }}>
-                  <button
-                    className="btn-primary"
-                    disabled={!!navigatingId}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      fontSize: '0.88rem',
-                      background: 'var(--gradient-brand)',
-                      border: 'none',
+                  <div>
+                    <div style={{
+                      fontWeight: 800,
+                      fontSize: '1.15rem',
+                      color: 'var(--text-primary)',
+                      marginBottom: '4px'
+                    }}>
+                      {doc.full_name}
+                    </div>
+                    <div style={{
+                      fontSize: '0.85rem',
+                      color: '#05aebb',
                       fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 10,
-                    }}
-                  >
-                    {isThisCardNavigating ? (
-                      <>
-                        <span
-                          className="spinner"
-                          style={{
-                            width: 16,
-                            height: 16,
-                            borderWidth: 2,
-                          }}
-                        />
-                        Connecting…
-                      </>
-                    ) : (
-                      'Start Consultation'
-                    )}
-                  </button>
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px'
+                    }}>
+                      {doc.specialty_name || doc.specialty || 'General Physician'}
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    Verified medical professional available for consultations and diagnostic review.
+                  </p>
+
+                  <div style={{ marginTop: 'auto', paddingTop: '12px' }}>
+                    <button
+                      className="btn-primary"
+                      disabled={!!navigatingId}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        fontSize: '0.88rem',
+                        background: 'var(--gradient-brand)',
+                        border: 'none',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 10,
+                      }}
+                    >
+                      {isThisCardNavigating ? (
+                        <>
+                          <span
+                            className="spinner"
+                            style={{
+                              width: 16,
+                              height: 16,
+                              borderWidth: 2,
+                            }}
+                          />
+                          Connecting…
+                        </>
+                      ) : (
+                        'Start Consultation'
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
               );
             })}
           </div>

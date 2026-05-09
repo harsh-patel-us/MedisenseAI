@@ -447,12 +447,12 @@ export default function PatientChat() {
     };
     const loadingMsg: UiMessage | null = !doctorJoined
       ? {
-          id: `local-loading-${Date.now()}`,
-          role: 'assistant',
-          content: '',
-          created_at: new Date().toISOString(),
-          pending: true,
-        }
+        id: `local-loading-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+        pending: true,
+      }
       : null;
 
     setMessages((prev) => (loadingMsg ? [...prev, optimisticMsg, loadingMsg] : [...prev, optimisticMsg]));
@@ -1066,7 +1066,7 @@ export default function PatientChat() {
 
           {!initialLoading && sessionLoading && (
             <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 32 }}>
-              <div className="spinner" style={{ margin: '0 auto 12px' }} />
+              <div className="spinner" style={{ margin: '0 auto 12px' }} /> &nbsp;
               Loading conversation…
             </div>
           )}

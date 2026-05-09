@@ -13,41 +13,105 @@ logger = logging.getLogger(__name__)
 
 # ── Unicode font registration ────────────────────────────────────────────
 # ReportLab ships only Latin fonts (Helvetica, Times-Roman, Courier). For
-# Indic / Arabic scripts we have to register a TrueType font that contains
-# the relevant glyphs. We try, in order:
-#   1. A project-relative `backend/fonts/` directory (if you bundle fonts).
-#   2. Common system locations on Windows / macOS / Linux.
-# If nothing is found we keep using Helvetica — text in Devanagari, Bengali,
-# Tamil, etc. will then render as boxes, which is the same behaviour as
-# before this feature shipped. The localized header note is still emitted
-# so the patient can see the content was meant to be in their language.
+# Indic / Arabic scripts we have to register a TrueType font that covers
+# the relevant glyphs. We register a *family* (regular + bold) so that
+# `<b>...</b>` tags inside Paragraph text resolve to a real bold variant.
+#
+# Priority order:
+#   1. Project-relative `backend/fonts/` bundle (Noto / DejaVu).
+#   2. Multi-script Indic font shipped with Windows (Nirmala UI .ttc).
+#   3. Other Windows / macOS / Linux multi-script fallbacks.
+# If nothing works we keep using Helvetica and warn — text in Devanagari,
+# Bengali, Tamil, etc. would then render as missing-glyph boxes/empty
+# strings, which was the bug that motivated this rewrite.
 
 _UNICODE_FONT_NAME = "MediSenseUnicode"
+_UNICODE_FONT_BOLD_NAME = "MediSenseUnicode-Bold"
 _UNICODE_FONT_REGISTERED: bool | None = None  # tri-state: None = not tried yet
 
-_FONT_CANDIDATES = [
-    # Project-relative bundle dir (preferred — guaranteed coverage).
-    Path(__file__).resolve().parent.parent / "fonts" / "NotoSans-Regular.ttf",
-    Path(__file__).resolve().parent.parent / "fonts" / "DejaVuSans.ttf",
-    # Linux
-    Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    # Windows
-    Path(r"C:\Windows\Fonts\NotoSans-Regular.ttf"),
-    Path(r"C:\Windows\Fonts\seguisym.ttf"),  # Segoe UI Symbol — best Windows fallback
-    Path(r"C:\Windows\Fonts\arial.ttf"),
-    # macOS
-    Path("/Library/Fonts/Arial Unicode.ttf"),
-    Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+# Each candidate is (regular_path, bold_path | None,
+#                    regular_subfont_index | None, bold_subfont_index | None).
+# The subfont indices are only used for `.ttc` collections — None means
+# treat as a plain `.ttf`.
+_FONT_CANDIDATES: list[tuple[Path, Path | None, int | None, int | None]] = [
+    # ── Project-bundled (preferred — guaranteed Indic + Latin coverage) ──
+    (
+        Path(__file__).resolve().parent.parent / "fonts" / "NotoSans-Regular.ttf",
+        Path(__file__).resolve().parent.parent / "fonts" / "NotoSans-Bold.ttf",
+        None, None,
+    ),
+    (
+        Path(__file__).resolve().parent.parent / "fonts" / "DejaVuSans.ttf",
+        Path(__file__).resolve().parent.parent / "fonts" / "DejaVuSans-Bold.ttf",
+        None, None,
+    ),
+    # ── Linux distro paths ──
+    (
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+        None, None,
+    ),
+    (
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        None, None,
+    ),
+    # ── Windows: Nirmala UI is Microsoft's pan-Indic font (Win 8+) ──
+    # Covers Devanagari, Bengali, Tamil, Telugu, Kannada, Malayalam,
+    # Gurmukhi, Gujarati, Oriya — exactly the scripts we localize into.
+    # Ships as a `.ttc` collection on most installs; we read subfont 0.
+    (
+        Path(r"C:\Windows\Fonts\Nirmala.ttf"),
+        Path(r"C:\Windows\Fonts\NirmalaB.ttf"),
+        None, None,
+    ),
+    (
+        Path(r"C:\Windows\Fonts\Nirmala.ttc"),
+        Path(r"C:\Windows\Fonts\Nirmala.ttc"),
+        0, 1,
+    ),
+    # ── Windows: Arial Unicode MS (ships with MS Office) ──
+    (
+        Path(r"C:\Windows\Fonts\arialuni.ttf"),
+        None, None, None,
+    ),
+    # ── Windows: Segoe UI (decent Indic + Arabic + Latin coverage) ──
+    (
+        Path(r"C:\Windows\Fonts\segoeui.ttf"),
+        Path(r"C:\Windows\Fonts\segoeuib.ttf"),
+        None, None,
+    ),
+    # ── Windows: Microsoft Sans Serif (broad Unicode, weak Indic) ──
+    (
+        Path(r"C:\Windows\Fonts\micross.ttf"),
+        None, None, None,
+    ),
+    # ── Windows: Arial (last-ditch — limited Indic but better than blanks) ──
+    (
+        Path(r"C:\Windows\Fonts\arial.ttf"),
+        Path(r"C:\Windows\Fonts\arialbd.ttf"),
+        None, None,
+    ),
+    # ── macOS ──
+    (
+        Path("/Library/Fonts/Arial Unicode.ttf"),
+        None, None, None,
+    ),
+    (
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        None, None, None,
+    ),
 ]
 
 
 def _ensure_unicode_font() -> str:
-    """Register a Unicode-capable TTF the first time we need one.
+    """Register a Unicode-capable TTF *family* (regular + bold) the first
+    time we need one and wire `<b>` tag mapping so HTML-style bold inside
+    Paragraph text resolves to the real bold face.
 
-    Returns the registered font name (which the PDF body styles can use)
-    or "Helvetica" if no candidate was found. Idempotent; safe to call
-    from multiple PDF generators.
+    Returns the family name to use as `fontName=` on ParagraphStyle (and as
+    the FONTNAME entry in TableStyle), or "Helvetica" if no candidate was
+    found. Idempotent; safe to call from multiple PDF generators.
     """
     global _UNICODE_FONT_REGISTERED
     if _UNICODE_FONT_REGISTERED:
@@ -58,19 +122,53 @@ def _ensure_unicode_font() -> str:
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.fonts import addMapping
     except Exception:
         _UNICODE_FONT_REGISTERED = False
         return "Helvetica"
 
-    for path in _FONT_CANDIDATES:
+    def _make_ttfont(name: str, path: Path, subfont: int | None) -> TTFont:
+        if subfont is not None:
+            return TTFont(name, str(path), subfontIndex=subfont)
+        return TTFont(name, str(path))
+
+    for reg_path, bold_path, reg_idx, bold_idx in _FONT_CANDIDATES:
         try:
-            if path.exists():
-                pdfmetrics.registerFont(TTFont(_UNICODE_FONT_NAME, str(path)))
-                logger.info(f"Registered Unicode PDF font from {path}")
-                _UNICODE_FONT_REGISTERED = True
-                return _UNICODE_FONT_NAME
+            if not reg_path.exists():
+                continue
+            pdfmetrics.registerFont(_make_ttfont(_UNICODE_FONT_NAME, reg_path, reg_idx))
+
+            # Register a bold variant. If we don't have a real bold TTF for
+            # this candidate, alias the regular face under the bold name so
+            # `<b>` tags don't drop the run silently.
+            if bold_path and bold_path.exists():
+                try:
+                    pdfmetrics.registerFont(
+                        _make_ttfont(_UNICODE_FONT_BOLD_NAME, bold_path, bold_idx)
+                    )
+                except Exception:
+                    pdfmetrics.registerFont(
+                        _make_ttfont(_UNICODE_FONT_BOLD_NAME, reg_path, reg_idx)
+                    )
+            else:
+                pdfmetrics.registerFont(
+                    _make_ttfont(_UNICODE_FONT_BOLD_NAME, reg_path, reg_idx)
+                )
+
+            # Tell ReportLab how to resolve <b>/<i> inside Paragraph text.
+            addMapping(_UNICODE_FONT_NAME, 0, 0, _UNICODE_FONT_NAME)        # regular
+            addMapping(_UNICODE_FONT_NAME, 1, 0, _UNICODE_FONT_BOLD_NAME)   # bold
+            addMapping(_UNICODE_FONT_NAME, 0, 1, _UNICODE_FONT_NAME)        # italic → reg
+            addMapping(_UNICODE_FONT_NAME, 1, 1, _UNICODE_FONT_BOLD_NAME)   # bold-italic
+
+            logger.info(
+                f"Registered Unicode PDF font family from {reg_path}"
+                f" (bold: {bold_path if bold_path and bold_path.exists() else 'aliased to regular'})"
+            )
+            _UNICODE_FONT_REGISTERED = True
+            return _UNICODE_FONT_NAME
         except Exception as exc:
-            logger.debug(f"Skipping font candidate {path}: {exc}")
+            logger.debug(f"Skipping font candidate {reg_path}: {exc}")
             continue
 
     logger.warning(
@@ -80,6 +178,17 @@ def _ensure_unicode_font() -> str:
     )
     _UNICODE_FONT_REGISTERED = False
     return "Helvetica"
+
+
+def _bold_font_for(family: str) -> str:
+    """Return the matching bold face name for a registered family.
+
+    For the registered Unicode family we have an explicit "-Bold" variant.
+    For Helvetica (the fallback) ReportLab knows the built-in name.
+    """
+    if family == _UNICODE_FONT_NAME:
+        return _UNICODE_FONT_BOLD_NAME
+    return f"{family}-Bold"
 
 
 # RTL-script codes where ReportLab's left-to-right layout is known to be
@@ -259,6 +368,13 @@ def generate_patient_pdf(
         body_font = "Helvetica"
         if lang_code != "en":
             body_font = _ensure_unicode_font()
+        # Bold face that pairs with `body_font` — the Unicode family has an
+        # explicit "-Bold" variant we registered; Helvetica uses the
+        # built-in "Helvetica-Bold". Used everywhere we'd otherwise hard-
+        # code "Helvetica-Bold", so non-English PDFs no longer fall back to
+        # a Latin-only face on bold runs (the bug that surfaced as empty
+        # cells in the findings table for translated values).
+        bold_font = _bold_font_for(body_font)
 
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -269,19 +385,22 @@ def generate_patient_pdf(
         elements = []
 
         header_style = ParagraphStyle("h", parent=styles["Title"],
-                                       textColor=colors.HexColor("#1759B0"), fontSize=22, spaceAfter=4)
+                                       textColor=colors.HexColor("#1759B0"), fontSize=22, spaceAfter=4,
+                                       fontName=bold_font)
         sub_style = ParagraphStyle("s", parent=styles["Normal"],
-                                    textColor=colors.HexColor("#05AEBB"), fontSize=11, spaceAfter=2)
+                                    textColor=colors.HexColor("#05AEBB"), fontSize=11, spaceAfter=2,
+                                    fontName=body_font)
         section_heading = ParagraphStyle("sh", parent=styles["Heading2"],
                                           textColor=colors.white, fontSize=12,
                                           backColor=colors.HexColor("#1759B0"),
-                                          borderPad=6, spaceAfter=6, spaceBefore=10)
+                                          borderPad=6, spaceAfter=6, spaceBefore=10,
+                                          fontName=bold_font)
         body = ParagraphStyle(
             "body", parent=styles["Normal"], fontSize=9, spaceAfter=3,
             fontName=body_font,
         )
         bold_label = ParagraphStyle("bl", parent=styles["Normal"],
-                                    fontSize=9, fontName="Helvetica-Bold",
+                                    fontSize=9, fontName=bold_font,
                                     textColor=colors.HexColor("#1759B0"))
 
         # Header
@@ -344,7 +463,11 @@ def generate_patient_pdf(
             findings_table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1759B0")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 0), (-1, 0), bold_font),
+                # Body cells must use the Unicode family too; without this
+                # row the table inherits Helvetica and translated values
+                # like "9.2 ग्राम" or "उच्च" rendered as blanks.
+                ("FONTNAME", (0, 1), (-1, -1), body_font),
                 ("FONTSIZE", (0, 0), (-1, -1), 8.5),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F7FB")]),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCDD")),
@@ -403,12 +526,12 @@ def generate_patient_pdf(
             if emergency:
                 elements.append(Paragraph("Emergency Signs — Go to ER immediately:", bold_label))
                 for e in emergency:
-                    elements.append(Paragraph(f"  🚨 {e}", ParagraphStyle("em", parent=body, textColor=colors.HexColor("#D72E2E"))))
+                    elements.append(Paragraph(f"  🚨 {e}", ParagraphStyle("em", parent=body, textColor=colors.HexColor("#D72E2E"), fontName=body_font)))
 
         # Disclaimer
         elements.append(Spacer(1, 0.5*cm))
         elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#D72E2E")))
-        elements.append(Paragraph(DISCLAIMER, ParagraphStyle("d", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#D72E2E"))))
+        elements.append(Paragraph(DISCLAIMER, ParagraphStyle("d", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#D72E2E"), fontName=body_font)))
 
         doc.build(elements)
         return buffer.getvalue()
@@ -423,8 +546,14 @@ def generate_consultation_patient_pdf(
     patient_name: str = "Anonymous Patient",
     doctor_name: str = "Attending Physician",
     session_id: str | None = None,
+    language: str = "en",
 ) -> bytes:
-    """Generate a patient-friendly consultation summary PDF in plain language."""
+    """Generate a patient-friendly consultation summary PDF in plain language.
+
+    `language` is the ISO code the LLM was asked to write in. When non-English
+    we register and use a Unicode-capable font family for every text style so
+    Devanagari / Tamil / Bengali etc. don't render as empty cells.
+    """
     try:
         from reportlab.lib import colors
         from reportlab.lib.enums import TA_LEFT
@@ -440,6 +569,17 @@ def generate_consultation_patient_pdf(
             TableStyle,
         )
 
+        try:
+            from config import normalize_language
+            lang_code = normalize_language(language)
+        except Exception:
+            lang_code = "en"
+
+        body_font = "Helvetica"
+        if lang_code != "en":
+            body_font = _ensure_unicode_font()
+        bold_font = _bold_font_for(body_font)
+
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer, pagesize=A4,
@@ -448,21 +588,26 @@ def generate_consultation_patient_pdf(
         styles = getSampleStyleSheet()
 
         header_style = ParagraphStyle("h", parent=styles["Title"],
-                                       textColor=colors.HexColor("#1759B0"), fontSize=22, spaceAfter=4)
+                                       textColor=colors.HexColor("#1759B0"), fontSize=22, spaceAfter=4,
+                                       fontName=bold_font)
         sub_style = ParagraphStyle("s", parent=styles["Normal"],
-                                    textColor=colors.HexColor("#05AEBB"), fontSize=11, spaceAfter=2)
+                                    textColor=colors.HexColor("#05AEBB"), fontSize=11, spaceAfter=2,
+                                    fontName=body_font)
         section_heading = ParagraphStyle("sh", parent=styles["Heading2"],
                                           textColor=colors.white, fontSize=12,
                                           backColor=colors.HexColor("#1759B0"),
-                                          borderPad=6, spaceAfter=6, spaceBefore=12)
-        body = ParagraphStyle("body", parent=styles["Normal"], fontSize=9.5, spaceAfter=4, leading=14)
+                                          borderPad=6, spaceAfter=6, spaceBefore=12,
+                                          fontName=bold_font)
+        body = ParagraphStyle("body", parent=styles["Normal"], fontSize=9.5, spaceAfter=4, leading=14,
+                              fontName=body_font)
         bold_label = ParagraphStyle("bl", parent=styles["Normal"],
-                                    fontSize=9.5, fontName="Helvetica-Bold",
+                                    fontSize=9.5, fontName=bold_font,
                                     textColor=colors.HexColor("#1759B0"), spaceAfter=2)
         bullet = ParagraphStyle("bullet", parent=styles["Normal"], fontSize=9.5, spaceAfter=3,
-                                 leftIndent=12, leading=14)
+                                 leftIndent=12, leading=14, fontName=body_font)
         warn = ParagraphStyle("warn", parent=styles["Normal"], fontSize=9.5,
-                               textColor=colors.HexColor("#D72E2E"), spaceAfter=3, leftIndent=12)
+                               textColor=colors.HexColor("#D72E2E"), spaceAfter=3, leftIndent=12,
+                               fontName=body_font)
 
         elements = []
 
@@ -478,10 +623,10 @@ def generate_consultation_patient_pdf(
         ]
         meta_table = Table(meta, colWidths=[2.5*cm, 7*cm, 2.5*cm, 5.5*cm])
         meta_table.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTNAME", (0, 0), (-1, -1), body_font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (0, -1), bold_font),
+            ("FONTNAME", (2, 0), (2, -1), bold_font),
             ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#222233")),
             ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.HexColor("#F2F4F8"), colors.white]),
             ("PADDING", (0, 0), (-1, -1), 5),
@@ -585,7 +730,8 @@ def generate_consultation_patient_pdf(
         elements.append(Paragraph(
             DISCLAIMER,
             ParagraphStyle("d", parent=styles["Normal"], fontSize=7.5,
-                           textColor=colors.HexColor("#D72E2E")),
+                           textColor=colors.HexColor("#D72E2E"),
+                           fontName=body_font),
         ))
 
         doc.build(elements)
