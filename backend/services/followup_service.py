@@ -580,7 +580,8 @@ async def send_followup_to_patient_chat(
     session.message_count = (session.message_count or 0) + 1
 
     # Mark the follow-up so the doctor UI can disable the button.
-    followup_plan.is_sent_to_patient = True
+    # Integer column under the hood — bind 1, not Python True.
+    followup_plan.is_sent_to_patient = 1
     db_session.add(followup_plan)
 
     await db_session.commit()

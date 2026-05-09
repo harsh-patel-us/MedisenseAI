@@ -76,6 +76,11 @@ export default function PatientReportUpload() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openHistoryId, setOpenHistoryId] = useState<string | null>(null);
   const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
+  // Which button on the busy row is doing work — drives the inline loader
+  // text so users can tell whether they triggered "View" / "File" / "PDF".
+  const [historyBusyAction, setHistoryBusyAction] = useState<
+    'open' | 'file' | 'pdf' | null
+  >(null);
 
   const refreshHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -98,21 +103,31 @@ export default function PatientReportUpload() {
 
   const handleUpload = async (file: File) => {
     setIsUploading(true);
+    setIsAnalyzing(false);
     setError(null);
+    setUploadData(null);
     setAnalysis(null);
     setOpenHistoryId(null);
+    setActiveTab('summary');
 
     try {
       const uploadRes = await uploadReport(file);
       setUploadData(uploadRes);
-      setIsUploading(false);
 
       // Immediately analyze
       setIsAnalyzing(true);
+      setIsUploading(false);
       const analysisRes = await analyzeReport(uploadRes.file_id, uploadRes.raw_text);
       setAnalysis(analysisRes);
       // Surface the new record in the history list right away.
       void refreshHistory();
+      // Scroll the result into view so the user sees the analysis appear
+      // instead of having to hunt for it after the loader disappears.
+      setTimeout(() => {
+        document
+          .getElementById('analysis-area')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
     } catch (err: any) {
       console.error('Upload/analyze failed:', err);
       setError(err.response?.data?.detail || err.message || 'Upload or analysis failed');
@@ -148,6 +163,7 @@ export default function PatientReportUpload() {
 
   const handleOpenHistory = async (item: HistoryItem) => {
     setHistoryBusyId(item.id);
+    setHistoryBusyAction('open');
     setError(null);
     try {
       const detail = await getPatientHistoryItem(item.id);
@@ -184,11 +200,13 @@ export default function PatientReportUpload() {
       setError(err?.response?.data?.detail || err?.message || 'Could not open past report');
     } finally {
       setHistoryBusyId(null);
+      setHistoryBusyAction(null);
     }
   };
 
   const handleDownloadHistoryFile = async (item: HistoryItem) => {
     setHistoryBusyId(item.id);
+    setHistoryBusyAction('file');
     try {
       const blob = await downloadHistoryUpload(item.id);
       downloadBlob(blob, item.file_name || `report_${item.id}`);
@@ -196,11 +214,13 @@ export default function PatientReportUpload() {
       setHistoryError(err?.response?.data?.detail || 'Could not download original file');
     } finally {
       setHistoryBusyId(null);
+      setHistoryBusyAction(null);
     }
   };
 
   const handleDownloadHistoryPdf = async (item: HistoryItem) => {
     setHistoryBusyId(item.id);
+    setHistoryBusyAction('pdf');
     try {
       const blob = await downloadHistoryPdf(item.id);
       downloadBlob(blob, `medisense_health_guide_${item.id}.pdf`);
@@ -211,6 +231,7 @@ export default function PatientReportUpload() {
       );
     } finally {
       setHistoryBusyId(null);
+      setHistoryBusyAction(null);
     }
   };
 
@@ -231,9 +252,12 @@ export default function PatientReportUpload() {
           </p>
         </div>
 
-        {/* Uploader */}
+        {/* Uploader — single continuous loader through both upload and
+            analyze phases, with phase-aware label inside the card. */}
         <ReportUploader
           isUploading={isUploading}
+          isAnalyzing={isAnalyzing}
+          analysisComplete={!!analysis}
           onUpload={handleUpload}
           uploadedFileName={uploadData?.file_name}
         />
@@ -259,27 +283,49 @@ export default function PatientReportUpload() {
           </div>
         )}
 
-        {/* Analyzing state */}
+        {/* Reassurance footer under the unified uploader card while the
+            analysis is in flight — keeps the user oriented when the LLM
+            takes the typical 15-30 seconds. */}
         {isAnalyzing && (
-          <div className="glass-card" style={{
-            marginTop: '24px', padding: '48px', textAlign: 'center',
-          }}>
-            <div className="spinner" style={{ margin: '0 auto 20px', width: 48, height: 48 }} />
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '8px' }}>
-              Analyzing Your Report...
-            </h3>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto' }}>
-              Our AI is reading your medical report and generating personalized health insights.
-              This usually takes 15-30 seconds.
-            </p>
-            <div style={{
-              display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '24px',
-              fontSize: '0.8rem', color: 'var(--text-muted)',
-            }}>
-              <span>📊 Extracting findings</span>
-              <span>🏥 Finding specialists</span>
-              <span>🥗 Creating diet plan</span>
-            </div>
+          <div
+            style={{
+              marginTop: 16,
+              padding: '12px 16px',
+              background: 'rgba(5,174,187,0.08)',
+              border: '1px solid rgba(5,174,187,0.3)',
+              borderRadius: 12,
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <div
+              className="spinner"
+              style={{ width: 18, height: 18, borderWidth: 2, flexShrink: 0 }}
+            />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span>
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  Analysis in progress.
+                </strong>{' '}
+                Our AI is reviewing your report — this usually takes 15–30 seconds.
+              </span>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  flexWrap: 'wrap',
+                  gap: 14,
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <span>📊 Extracting findings</span>
+                <span>🏥 Finding specialists</span>
+                <span>🥗 Creating diet plan</span>
+              </span>
+            </span>
           </div>
         )}
 
@@ -385,7 +431,14 @@ export default function PatientReportUpload() {
               disabled={historyLoading}
               style={{ fontSize: '0.82rem' }}
             >
-              {historyLoading ? 'Refreshing…' : '🔄 Refresh'}
+              {historyLoading ? (
+                <>
+                  <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                  Refreshing...
+                </>
+              ) : (
+                '🔄 Refresh'
+              )}
             </button>
           </div>
 
@@ -397,6 +450,16 @@ export default function PatientReportUpload() {
               borderRadius: '10px', color: '#fca5a5', fontSize: '0.85rem',
             }}>
               ⚠️ {historyError}
+            </div>
+          )}
+
+          {historyLoading && history.length === 0 && !historyError && (
+            <div style={{
+              padding: '24px', textAlign: 'center',
+              color: 'var(--text-muted)', fontSize: '0.88rem',
+            }}>
+              <div className="spinner" style={{ margin: '0 auto 12px' }} />
+              Loading your past reports…
             </div>
           )}
 
@@ -454,7 +517,16 @@ export default function PatientReportUpload() {
                           disabled={busy}
                           onClick={(e) => { e.stopPropagation(); handleOpenHistory(item); }}
                         >
-                          {busy && !isOpen ? 'Opening…' : isOpen ? '✓ Open' : 'View'}
+                          {busy && historyBusyAction === 'open' ? (
+                            <>
+                              <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                              Opening...
+                            </>
+                          ) : isOpen ? (
+                            '✓ Open'
+                          ) : (
+                            'View'
+                          )}
                         </button>
                         <button
                           className="btn-secondary"
@@ -463,7 +535,14 @@ export default function PatientReportUpload() {
                           onClick={(e) => { e.stopPropagation(); handleDownloadHistoryFile(item); }}
                           title={item.has_uploaded_file ? 'Download original file' : 'Original file not stored'}
                         >
-                          📎 File
+                          {busy && historyBusyAction === 'file' ? (
+                            <>
+                              <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                              File
+                            </>
+                          ) : (
+                            '📎 File'
+                          )}
                         </button>
                         <button
                           className="btn-primary"
@@ -472,7 +551,14 @@ export default function PatientReportUpload() {
                           onClick={(e) => { e.stopPropagation(); handleDownloadHistoryPdf(item); }}
                           title={item.has_generated_pdf ? 'Download generated PDF' : 'No PDF generated yet'}
                         >
-                          📥 PDF
+                          {busy && historyBusyAction === 'pdf' ? (
+                            <>
+                              <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                              PDF
+                            </>
+                          ) : (
+                            '📥 PDF'
+                          )}
                         </button>
                       </div>
                     </div>

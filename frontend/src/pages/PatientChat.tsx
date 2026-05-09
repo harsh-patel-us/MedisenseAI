@@ -147,6 +147,13 @@ export default function PatientChat() {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
+  // Initial mount loader — true until BOTH the chat history and the
+  // doctor directory have come back (or errored). Prevents the page
+  // from rendering a blank "select a specialist" screen while we're
+  // mid-fetch right after navigating from the dashboard.
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [doctorsLoaded, setDoctorsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // ── Voice (STT) state ────────────────────────────────────────────
@@ -216,6 +223,8 @@ export default function PatientChat() {
       console.error('Failed to load chat history', err);
       setError('Could not load your past conversations.');
       return [];
+    } finally {
+      setHistoryLoaded(true);
     }
   }, [patientId]);
 
@@ -232,12 +241,19 @@ export default function PatientChat() {
         if (!cancelled) setDoctors(res.doctors);
       } catch (err) {
         console.error('Failed to load doctors', err);
+      } finally {
+        if (!cancelled) setDoctorsLoaded(true);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Lift the page-level "loading" overlay once both initial fetches resolve.
+  useEffect(() => {
+    if (historyLoaded && doctorsLoaded) setInitialLoading(false);
+  }, [historyLoaded, doctorsLoaded]);
 
   /* ── Auto-save + summarize on leave ────────────────────────────── */
   useEffect(() => {
@@ -1029,13 +1045,33 @@ export default function PatientChat() {
             </div>
           )}
 
-          {sessionLoading && (
+          {initialLoading && (
+            <div
+              style={{
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                padding: 48,
+                margin: 'auto',
+              }}
+            >
+              <div className="spinner" style={{ margin: '0 auto 16px' }} />
+              <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Setting up your consultation…
+              </div>
+              <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                Loading your specialists and conversation history
+              </div>
+            </div>
+          )}
+
+          {!initialLoading && sessionLoading && (
             <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 32 }}>
+              <div className="spinner" style={{ margin: '0 auto 12px' }} />
               Loading conversation…
             </div>
           )}
 
-          {!sessionLoading && messages.length === 0 && !activeSessionId && !currentDoctor && (
+          {!initialLoading && !sessionLoading && messages.length === 0 && !activeSessionId && !currentDoctor && (
             <div
               style={{
                 margin: 'auto',
@@ -1072,7 +1108,7 @@ export default function PatientChat() {
             </div>
           )}
 
-          {!sessionLoading && messages.length === 0 && currentDoctor && (
+          {!initialLoading && !sessionLoading && messages.length === 0 && currentDoctor && (
             <div
               style={{
                 margin: 'auto',

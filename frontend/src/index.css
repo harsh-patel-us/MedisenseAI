@@ -180,6 +180,18 @@ body {
   transform: translateY(-2px);
 }
 
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary:disabled::after {
+  display: none;
+}
+
 /* ── Animations ──────────────────────────────────────────────────────── */
 @keyframes float {
   0%, 100% { transform: translateY(0); }
@@ -203,6 +215,19 @@ body {
   border-radius: 50%;
   display: inline-block;
   animation: pulse-dot 2s infinite;
+}
+
+.spinner {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(148, 163, 184, 0.28);
+  border-top-color: var(--brand-cyan);
+  border-right-color: var(--brand-teal);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  flex: 0 0 auto;
+  vertical-align: middle;
 }
 
 /* ── Premium Full Page Loader ────────────────────────────────────────── */
@@ -400,6 +425,4 @@ body {
   background: rgba(13, 148, 136, 0.12);
   box-shadow: 0 0 20px rgba(13, 148, 136, 0.1);
 }
-
-
 

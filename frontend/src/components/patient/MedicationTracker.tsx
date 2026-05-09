@@ -76,6 +76,12 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
   const [reminder, setReminder] = useState<string | null>(null);
   const [reminderLoading, setReminderLoading] = useState(false);
 
+  // Per-row busy ids for delete / dismiss so the affected row dims while
+  // the API call is in flight (otherwise the user clicks ✕ and sees nothing
+  // until the row vanishes — feels like the click was lost).
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     if (!patientId) return;
     try {
@@ -140,12 +146,16 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
   };
 
   const handleDelete = async (id: string) => {
+    if (deletingId) return;
+    setDeletingId(id);
     try {
       await deleteMedication(patientId, id);
       setMeds((prev) => prev.filter((m) => m.id !== id));
     } catch (err) {
       console.error('Failed to delete medication', err);
       setError('Could not remove that medication.');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -164,11 +174,15 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
   };
 
   const handleDismiss = async (alertId: string) => {
+    if (dismissingId) return;
+    setDismissingId(alertId);
     try {
       await dismissAlert(patientId, alertId);
       setAlerts((prev) => prev.filter((a) => a.id !== alertId));
     } catch (err) {
       console.error('Failed to dismiss alert', err);
+    } finally {
+      setDismissingId(null);
     }
   };
 
@@ -325,6 +339,7 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
         >
           {meds.map((m) => {
             const badge = sourceBadge(m.source);
+            const isDeleting = deletingId === m.id;
             return (
               <div
                 key={m.id}
@@ -335,12 +350,15 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
                   flexDirection: 'column',
                   gap: 8,
                   position: 'relative',
+                  opacity: isDeleting ? 0.55 : 1,
+                  transition: 'opacity 0.18s',
                 }}
               >
                 <button
                   onClick={() => handleDelete(m.id)}
+                  disabled={isDeleting}
                   aria-label={`Remove ${m.drug_name}`}
-                  title="Remove medication"
+                  title={isDeleting ? 'Removing…' : 'Remove medication'}
                   style={{
                     position: 'absolute',
                     top: 10,
@@ -351,12 +369,12 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
                     background: 'rgba(220, 38, 38, 0.15)',
                     color: '#fca5a5',
                     border: 'none',
-                    cursor: 'pointer',
+                    cursor: isDeleting ? 'wait' : 'pointer',
                     fontSize: 14,
                     lineHeight: 1,
                   }}
                 >
-                  ×
+                  {isDeleting ? '⏳' : '×'}
                 </button>
                 <div style={{ fontWeight: 800, fontSize: '1rem' }}>{m.drug_name}</div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
@@ -458,6 +476,7 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
                     </div>
                     <button
                       onClick={() => handleDismiss(a.id)}
+                      disabled={dismissingId === a.id}
                       style={{
                         background: 'transparent',
                         border: '1px solid rgba(255,255,255,0.18)',
@@ -465,10 +484,11 @@ export default function MedicationTracker({ patientId }: MedicationTrackerProps)
                         padding: '4px 10px',
                         color: 'var(--text-secondary)',
                         fontSize: '0.74rem',
-                        cursor: 'pointer',
+                        cursor:
+                          dismissingId === a.id ? 'wait' : 'pointer',
                       }}
                     >
-                      Dismiss
+                      {dismissingId === a.id ? 'Dismissing…' : 'Dismiss'}
                     </button>
                   </div>
                   <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>

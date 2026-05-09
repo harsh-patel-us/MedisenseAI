@@ -289,11 +289,14 @@ async def get_patient_medications(
     patient_id: str, db_session: AsyncSession
 ) -> list[PatientMedication]:
     """All currently-active medications for a patient, newest first."""
+    # is_active is `Mapped[bool] = mapped_column(Integer, ...)` for
+    # cross-DB compatibility — compare against 1, not Python True, so
+    # asyncpg/Postgres doesn't reject `int_col = true`.
     result = await db_session.execute(
         select(PatientMedication)
         .where(
             PatientMedication.patient_id == patient_id,
-            PatientMedication.is_active == True,  # noqa: E712
+            PatientMedication.is_active == 1,
         )
         .order_by(PatientMedication.created_at.desc())
     )
@@ -351,17 +354,19 @@ async def run_interaction_check(
                     severity=p["severity"],
                     description=p.get("description") or "",
                     source=p.get("source", "openfda"),
-                    is_dismissed=False,
+                    is_dismissed=0,
                 )
             )
             existing_keys.add(key)
         await db_session.commit()
 
+    # See comment above — is_dismissed is INTEGER under the hood, so the
+    # comparison must be against 0, not Python's False.
     result = await db_session.execute(
         select(MedicationInteractionAlert)
         .where(
             MedicationInteractionAlert.patient_id == patient_id,
-            MedicationInteractionAlert.is_dismissed == False,  # noqa: E712
+            MedicationInteractionAlert.is_dismissed == 0,
         )
         .order_by(MedicationInteractionAlert.created_at.desc())
     )

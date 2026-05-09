@@ -112,11 +112,14 @@ async def _current_medication_alerts(
     patient_id: str, db: AsyncSession
 ) -> list[MedicationAlert]:
     """Snapshot of undismissed interaction alerts on file right now."""
+    # is_dismissed is declared `Mapped[bool] = mapped_column(Integer, ...)`
+    # for cross-DB compatibility. Postgres rejects `int_col = false` so we
+    # compare against the literal 0 instead of Python's False.
     result = await db.execute(
         select(MedicationInteractionAlert)
         .where(
             MedicationInteractionAlert.patient_id == patient_id,
-            MedicationInteractionAlert.is_dismissed == False,  # noqa: E712
+            MedicationInteractionAlert.is_dismissed == 0,
         )
         .order_by(MedicationInteractionAlert.created_at.desc())
     )

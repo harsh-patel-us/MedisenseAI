@@ -180,7 +180,9 @@ async def soft_delete_medication(
     med = result.scalar_one_or_none()
     if med is None:
         raise HTTPException(status_code=404, detail="Medication not found")
-    med.is_active = False
+    # Integer column under the hood — assign 0, not Python False, so the
+    # UPDATE bind-param round-trip on Postgres is unambiguous.
+    med.is_active = 0
     await db.commit()
     await db.refresh(med)
     return _serialize_med(med)
@@ -220,7 +222,7 @@ async def dismiss_alert(
     alert = result.scalar_one_or_none()
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
-    alert.is_dismissed = True
+    alert.is_dismissed = 1
     await db.commit()
     await db.refresh(alert)
     return _serialize_alert(alert)

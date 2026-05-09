@@ -849,8 +849,10 @@ async def toggle_chat_ai(
         raise HTTPException(status_code=404, detail="Session not found")
     _ensure_doctor_assigned(_user, session)
 
+    # doctor_joined is INTEGER under the hood (cross-DB bool). Bind 0/1
+    # so asyncpg/Postgres doesn't see a Python bool against an INTEGER col.
     was_joined = bool(session.doctor_joined)
-    session.doctor_joined = not was_joined
+    session.doctor_joined = 0 if was_joined else 1
     session.session_mode = "doctor" if not was_joined else "ai"
 
     note = (

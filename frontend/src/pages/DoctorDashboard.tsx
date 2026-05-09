@@ -98,6 +98,23 @@ export default function DoctorDashboard() {
   }, [loadMeetSessions]);
 
   const handleProcessMeet = async (sessionId: string) => {
+    // Optimistic state so the "Process Transcript" button immediately
+    // disables and the row shows "Starting…" — otherwise the button
+    // looks frozen while we wait for the kickoff API to return.
+    setMeetStatus((s) => ({
+      ...s,
+      [sessionId]: {
+        task_id: '',
+        session_id: sessionId,
+        status: 'pending',
+        detail: 'Starting…',
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        soap_note: null,
+        patient_explanation: null,
+        transcript: [],
+      },
+    }));
     try {
       const res = await processTranscript({ session_id: sessionId });
       setMeetStatus((s) => ({
@@ -106,7 +123,7 @@ export default function DoctorDashboard() {
           task_id: res.task_id,
           session_id: sessionId,
           status: 'pending',
-          detail: 'Starting...',
+          detail: 'Queued for processing…',
           started_at: new Date().toISOString(),
           completed_at: null,
           soap_note: null,
@@ -409,7 +426,14 @@ export default function DoctorDashboard() {
               disabled={meetLoading}
               style={{ fontSize: '0.8rem', padding: '8px 16px' }}
             >
-              {meetLoading ? '↻ Loading…' : '↻ Refresh'}
+              {meetLoading ? (
+                <>
+                  <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                  Loading...
+                </>
+              ) : (
+                '↻ Refresh'
+              )}
             </button>
           </div>
 
@@ -654,7 +678,14 @@ export default function DoctorDashboard() {
                 disabled={!specialtyDraft || savingSpecialty}
                 style={{ padding: '10px 18px', fontSize: '0.85rem' }}
               >
-                {savingSpecialty ? 'Saving…' : 'Save specialty'}
+                {savingSpecialty ? (
+                  <>
+                    <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                    Saving...
+                  </>
+                ) : (
+                  'Save specialty'
+                )}
               </button>
             </div>
           </div>

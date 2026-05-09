@@ -8,8 +8,23 @@ import { useAuth } from '../contexts/AuthContext';
 export default function PatientDashboard() {
   const [doctors, setDoctors] = useState<DoctorCard[]>([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
+  // Holds the id of the doctor whose card the user just clicked. Drives
+  // the "Connecting…" state on that card during route transition so the
+  // user gets immediate feedback instead of a frozen-looking page.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  const handleSelectDoctor = (doctorId: string) => {
+    if (navigatingId) return;
+    setNavigatingId(doctorId);
+    // Defer navigation by a frame so the "Connecting…" state paints before
+    // the route swaps out — otherwise users on slow devices see no feedback
+    // at all between click and the new page rendering its own loader.
+    requestAnimationFrame(() => {
+      navigate('/patient/chat', { state: { doctorId } });
+    });
+  };
 
   const loadDoctors = useCallback(async () => {
     setDoctorsLoading(true);
@@ -85,30 +100,44 @@ export default function PatientDashboard() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             gap: '24px',
           }}>
-            {doctors.map((doc) => (
+            {doctors.map((doc) => {
+              const isThisCardNavigating = navigatingId === doc.id;
+              const anotherCardNavigating =
+                navigatingId !== null && navigatingId !== doc.id;
+              return (
               <div
                 key={doc.id}
-                onClick={() => navigate('/patient/chat', { state: { doctorId: doc.id } })}
+                onClick={() => !navigatingId && handleSelectDoctor(doc.id)}
                 style={{
                   padding: '24px',
-                  background: 'rgba(6,13,27,0.45)',
-                  border: '1px solid var(--border-subtle)',
+                  background: isThisCardNavigating
+                    ? 'rgba(5,174,187,0.14)'
+                    : 'rgba(6,13,27,0.45)',
+                  border: `1px solid ${
+                    isThisCardNavigating
+                      ? '#05aebb'
+                      : 'var(--border-subtle)'
+                  }`,
                   borderRadius: '20px',
-                  cursor: 'pointer',
+                  cursor: navigatingId ? 'wait' : 'pointer',
                   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '12px',
                   position: 'relative',
                   overflow: 'hidden',
+                  opacity: anotherCardNavigating ? 0.45 : 1,
+                  pointerEvents: navigatingId ? 'none' : 'auto',
                 }}
                 onMouseEnter={(e) => {
+                  if (navigatingId) return;
                   e.currentTarget.style.borderColor = '#05aebb';
                   e.currentTarget.style.transform = 'translateY(-4px)';
                   e.currentTarget.style.background = 'rgba(5,174,187,0.1)';
                   e.currentTarget.style.boxShadow = '0 12px 24px rgba(5,174,187,0.15)';
                 }}
                 onMouseLeave={(e) => {
+                  if (navigatingId) return;
                   e.currentTarget.style.borderColor = 'var(--border-subtle)';
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.background = 'rgba(6,13,27,0.45)';
@@ -155,20 +184,40 @@ export default function PatientDashboard() {
                 <div style={{ marginTop: 'auto', paddingTop: '12px' }}>
                   <button
                     className="btn-primary"
-                    style={{ 
-                      width: '100%', 
-                      padding: '12px', 
+                    disabled={!!navigatingId}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
                       fontSize: '0.88rem',
                       background: 'var(--gradient-brand)',
                       border: 'none',
                       fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 10,
                     }}
                   >
-                    Start Consultation
+                    {isThisCardNavigating ? (
+                      <>
+                        <span
+                          className="spinner"
+                          style={{
+                            width: 16,
+                            height: 16,
+                            borderWidth: 2,
+                          }}
+                        />
+                        Connecting…
+                      </>
+                    ) : (
+                      'Start Consultation'
+                    )}
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
