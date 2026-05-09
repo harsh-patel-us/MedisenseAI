@@ -150,3 +150,99 @@ export interface BiomarkerTrendResponse {
 export interface LabTrendChartProps {
   patientId: string;
 }
+
+// ── Wearable / health-app data ───────────────────────────────────────
+
+export type WearableSource =
+  | 'apple_health'
+  | 'fitbit'
+  | 'google_fit'
+  | 'manual_csv'
+  | 'unknown'
+  | string;
+
+export interface WearableDailyHrReading {
+  date: string;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+export interface WearableSpo2Outlier {
+  date: string;
+  value: number;
+}
+
+export interface WearableGlucoseReading {
+  date: string;
+  value: number;
+}
+
+export interface WearableStats {
+  source: WearableSource;
+  date_range: { start: string | null; end: string | null };
+  heart_rate: {
+    avg: number | null;
+    min: number | null;
+    max: number | null;
+    resting_avg: number | null;
+    daily_readings: WearableDailyHrReading[];
+  };
+  spo2: {
+    avg: number | null;
+    min: number | null;
+    readings_below_94: WearableSpo2Outlier[];
+  };
+  steps: {
+    daily_avg: number | null;
+    total: number | null;
+    days_above_8000: number;
+  };
+  sleep: {
+    avg_hours: number | null;
+    nights_below_6: number;
+  };
+  weight: {
+    latest_kg: number | null;
+    change_kg: number | null;
+  };
+  blood_glucose: {
+    readings: WearableGlucoseReading[];
+  };
+  errors: string[];
+  raw_record_count: number;
+}
+
+export type WearableSummary = WearableStats;
+
+export interface WearableDataRecord {
+  id: string;
+  patient_id: string;
+  source: WearableSource;
+  upload_date: string;
+  date_range_start: string | null;
+  date_range_end: string | null;
+  file_size_bytes: number | null;
+  summary: WearableSummary | null;
+  ai_narrative: string;
+  key_findings: string[];
+}
+
+export interface WearableRecordListItem {
+  id: string;
+  source: WearableSource;
+  upload_date: string;
+  date_range_start: string | null;
+  date_range_end: string | null;
+  ai_narrative: string;
+  key_findings: string[];
+}
+
+export interface WearableRecordListResponse {
+  patient_id: string;
+  items: WearableRecordListItem[];
+}
+
+export interface WearableUploaderProps {
+  patientId: string;
+}

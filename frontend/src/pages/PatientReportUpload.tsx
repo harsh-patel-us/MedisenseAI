@@ -7,6 +7,7 @@ import DietExercisePlan from '../components/patient/DietExercisePlan';
 import PrecautionsList from '../components/patient/PrecautionsList';
 import MedicationTracker from '../components/patient/MedicationTracker';
 import LabTrendChart from '../components/patient/LabTrendChart';
+import WearableUploader from '../components/patient/WearableUploader';
 import { useAuth } from '../contexts/AuthContext';
 import {
   uploadReport,
@@ -30,7 +31,8 @@ type TabKey =
   | 'diet'
   | 'precautions'
   | 'medications'
-  | 'trends';
+  | 'trends'
+  | 'wearables';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'summary', label: 'Report Summary', icon: '📋' },
@@ -39,6 +41,7 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'precautions', label: 'Precautions', icon: '⚠️' },
   { key: 'medications', label: 'Medications', icon: '💊' },
   { key: 'trends', label: 'Trends', icon: '📈' },
+  { key: 'wearables', label: 'Wearables', icon: '⌚' },
 ];
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -346,6 +349,9 @@ export default function PatientReportUpload() {
               )}
               {activeTab === 'trends' && user?.id && (
                 <LabTrendChart patientId={user.id} />
+              )}
+              {activeTab === 'wearables' && user?.id && (
+                <WearableUploader patientId={user.id} />
               )}
             </div>
 

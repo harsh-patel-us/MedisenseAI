@@ -43,7 +43,12 @@ from prompts import (
     PATIENT_CHATBOT_SUMMARY_PROMPT,
     PATIENT_CHATBOT_SYSTEM_PROMPT,
 )
-from database import PatientAnalysisRecord, PatientChatSession, User
+from database import (
+    PatientAnalysisRecord,
+    PatientChatSession,
+    User,
+    WearableDataRecord,
+)
 from services.claude_service import get_client
 from services.report_parser import parse_uploaded_file
 from services.specialties import get_specialty
@@ -188,6 +193,62 @@ async def build_patient_context(
         past_summary_text = "\n".join(chunks)
 
     return profile, report_summary, past_summary_text
+
+
+async def _load_wearable_block(
+    db: AsyncSession, patient_id: str
+) -> str:
+    """Return the system-prompt block describing the patient's most recent
+    wearable / health-app upload, or an empty string when none exists.
+
+    We pull only the latest record to keep the context window predictable —
+    the prior records are still browsable via the patient's Wearables tab.
+    """
+    try:
+        result = await db.execute(
+            select(WearableDataRecord)
+            .where(WearableDataRecord.patient_id == patient_id)
+            .order_by(desc(WearableDataRecord.upload_date))
+            .limit(1)
+        )
+        record = result.scalars().first()
+    except Exception as exc:
+        logger.warning(f"Wearable block load failed: {exc}")
+        return ""
+
+    if record is None:
+        return ""
+
+    narrative = (record.ai_narrative or "").strip()
+    findings: list[str] = []
+    if record.key_findings:
+        try:
+            parsed = json.loads(record.key_findings)
+            if isinstance(parsed, list):
+                findings = [str(x).strip() for x in parsed if str(x).strip()]
+        except (TypeError, json.JSONDecodeError):
+            findings = []
+
+    if not narrative and not findings:
+        return ""
+
+    range_str = ""
+    if record.date_range_start or record.date_range_end:
+        start = record.date_range_start or "?"
+        end = record.date_range_end or "?"
+        range_str = f" (covering {start} → {end})"
+
+    bullets = "\n".join(f"  - {f}" for f in findings) if findings else ""
+    parts = [
+        "## Patient Wearable/Activity Data",
+        f"Source: {record.source}{range_str}",
+    ]
+    if narrative:
+        parts.append(narrative)
+    if bullets:
+        parts.append("Key findings:")
+        parts.append(bullets)
+    return "\n".join(parts)
 
 
 def format_system_prompt(
@@ -370,10 +431,14 @@ def _dynamic_instructions(
             "patient to re-upload."
         )
 
+    wearable_block = getattr(base, "_wearable_block", "")
+    wearable_section = f"\n\n{wearable_block}" if wearable_block else ""
+
     base_prompt = (
         format_system_prompt(
             profile, report_summary, past_summary, specialty_id, doctor_name
         )
+        + wearable_section
         + session_attachments_block
         + attachments_block
     )
@@ -480,6 +545,7 @@ async def generate_chat_reply(
 
     # Pre-load context so the dynamic instructions function is fast and sync.
     profile, report_summary, past_summaries = await build_patient_context(db, patient_id)
+    wearable_block = await _load_wearable_block(db, patient_id)
     ctx = ChatContext(
         patient_id=patient_id,
         db=db,
@@ -496,6 +562,7 @@ async def generate_chat_reply(
     ctx._patient_blood_group = profile["patient_blood_group"]  # type: ignore[attr-defined]
     ctx._report_summary = report_summary                   # type: ignore[attr-defined]
     ctx._past_summaries = past_summaries                   # type: ignore[attr-defined]
+    ctx._wearable_block = wearable_block                   # type: ignore[attr-defined]
 
     agent = get_dr_medisense()
     messages = _build_user_input(history, user_message, attachments)

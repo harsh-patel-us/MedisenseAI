@@ -16,6 +16,7 @@ from prompts import (
     SUMMARY_SPECIALIST_PROMPT,
     LIFESTYLE_GUIDE_PROMPT,
     PATIENT_EXPLANATION_PROMPT,
+    WEARABLE_NARRATIVE_PROMPT,
 )
 from utils.helpers import extract_json_from_response
 
@@ -302,3 +303,64 @@ async def generate_lifestyle_guide(
             "exercises_to_avoid": [],
             "precautions": {"daily_habits": [], "lifestyle_warnings": [], "emergency_signs": []},
         }
+
+
+# ── Wearable data narrative ─────────────────────────────────────────────
+
+
+_WEARABLE_FALLBACK = {
+    "clinical_summary": "",
+    "patient_narrative": "",
+    "key_findings": [],
+    "concerns": [],
+    "positive_patterns": [],
+}
+
+
+async def analyze_wearable_data(
+    wearable_stats: dict,
+    language: str | None = None,
+) -> dict:
+    """Run the wearable narrative prompt over a parsed stats dict and
+    return the JSON response. Falls back to an empty payload (rather than
+    raising) so the upload endpoint can still succeed on a parser hiccup.
+
+    `wearable_stats` is the dict produced by services.wearable_parser_service.
+    """
+    # Lazy import to avoid a circular when tests patch this module.
+    from services.wearable_parser_service import stats_for_prompt
+
+    summary_text = stats_for_prompt(wearable_stats)
+    system = _apply_language(
+        f"{SAFETY_SYSTEM_MESSAGE}\n\n{WEARABLE_NARRATIVE_PROMPT}", language
+    )
+    raw = await _chat(system, summary_text)
+    cleaned = extract_json_from_response(raw)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            f"Wearable narrative JSON parse error: {exc}\nRaw: {raw[:500]}"
+        )
+        return dict(_WEARABLE_FALLBACK)
+
+    # Coerce the shape so downstream code can assume the keys exist.
+    return {
+        "clinical_summary": str(parsed.get("clinical_summary") or "").strip(),
+        "patient_narrative": str(parsed.get("patient_narrative") or "").strip(),
+        "key_findings": [
+            str(x).strip()
+            for x in (parsed.get("key_findings") or [])
+            if str(x).strip()
+        ],
+        "concerns": [
+            str(x).strip()
+            for x in (parsed.get("concerns") or [])
+            if str(x).strip()
+        ],
+        "positive_patterns": [
+            str(x).strip()
+            for x in (parsed.get("positive_patterns") or [])
+            if str(x).strip()
+        ],
+    }

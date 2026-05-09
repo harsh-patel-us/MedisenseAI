@@ -162,6 +162,64 @@ class BiomarkerTrendResponse(BaseModel):
     biomarkers: List[BiomarkerTrend] = []
 
 
+class WearableSummary(BaseModel):
+    """The standardized parser output, mirrored for the API response.
+
+    Loose-typed sub-fields (`dict`/`list`) match what the parsers emit.
+    Strict shapes would force every parser to construct nested Pydantic
+    models on hot paths and we'd lose the ability to surface partial data.
+    """
+    source: str
+    date_range: dict = {}
+    heart_rate: dict = {}
+    spo2: dict = {}
+    steps: dict = {}
+    sleep: dict = {}
+    weight: dict = {}
+    blood_glucose: dict = {}
+    errors: List[str] = []
+    raw_record_count: int = 0
+
+
+class WearableNarrative(BaseModel):
+    """The LLM-generated split of clinician-facing + patient-facing text."""
+    clinical_summary: str = ""
+    patient_narrative: str = ""
+    key_findings: List[str] = []
+    concerns: List[str] = []
+    positive_patterns: List[str] = []
+
+
+class WearableDataRecordResponse(BaseModel):
+    """Returned from POST /patient/wearable/upload and the GET endpoints."""
+    id: str
+    patient_id: str
+    source: str
+    upload_date: str = ""
+    date_range_start: Optional[str] = None
+    date_range_end: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    summary: Optional[WearableSummary] = None
+    ai_narrative: str = ""
+    key_findings: List[str] = []
+
+
+class WearableRecordListItem(BaseModel):
+    """Lightweight history-list entry — no full summary blob."""
+    id: str
+    source: str
+    upload_date: str = ""
+    date_range_start: Optional[str] = None
+    date_range_end: Optional[str] = None
+    ai_narrative: str = ""
+    key_findings: List[str] = []
+
+
+class WearableRecordListResponse(BaseModel):
+    patient_id: str
+    items: List[WearableRecordListItem] = []
+
+
 class HistoryDetail(BaseModel):
     """Full payload for a single past analysis — drives the re-render."""
     id: str

@@ -32,10 +32,26 @@ from models.patient_models import (
     HistoryItem,
     HistoryListResponse,
     HistoryDetail,
+    WearableDataRecordResponse,
+    WearableNarrative,
+    WearableRecordListItem,
+    WearableRecordListResponse,
+    WearableSummary,
 )
 from services import claude_service as claude_service_module
 from services.report_parser import parse_uploaded_file, looks_like_extraction_failure
-from services.claude_service import analyze_report, generate_summary_and_specialists, generate_lifestyle_guide
+from services.claude_service import (
+    analyze_report,
+    analyze_wearable_data,
+    generate_summary_and_specialists,
+    generate_lifestyle_guide,
+)
+from services.wearable_parser_service import (
+    detect_wearable_format,
+    parse_apple_health_xml,
+    parse_fitbit_json,
+    parse_google_fit_json,
+)
 from services.biomarker_service import (
     extract_biomarkers,
     get_patient_biomarker_trends,
@@ -53,6 +69,7 @@ from database import (
     MedicationInteractionAlert,
     PatientAnalysisRecord,
     User,
+    WearableDataRecord,
     get_db,
 )
 
@@ -538,3 +555,242 @@ async def get_biomarker_trends(
             for entry in sorted_entries
         ],
     )
+
+
+# ── Wearable / health-app data ingestion ─────────────────────────────────
+
+
+# MIME types we accept for wearable uploads. Apple Health is XML, Fitbit
+# and Google Fit are JSON / ZIP-of-JSON. We don't enforce the source to
+# match the MIME — detect_wearable_format sniffs the actual bytes.
+_WEARABLE_ALLOWED_MIME = {
+    "application/xml",
+    "text/xml",
+    "application/json",
+    "text/json",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",  # browser sometimes uses this for unknown ext
+}
+
+# Map detect_wearable_format() → parser function. `unknown` is handled
+# separately so the user sees a helpful error.
+_WEARABLE_PARSERS = {
+    "apple_health": parse_apple_health_xml,
+    "fitbit": parse_fitbit_json,
+    "google_fit": parse_google_fit_json,
+}
+
+
+def _wearable_record_to_response(
+    record: WearableDataRecord,
+    summary: dict | None = None,
+) -> WearableDataRecordResponse:
+    parsed_summary: dict | None = summary
+    if parsed_summary is None and record.summary_json:
+        try:
+            parsed_summary = json.loads(record.summary_json)
+        except (TypeError, json.JSONDecodeError):
+            parsed_summary = None
+
+    findings: list[str] = []
+    if record.key_findings:
+        try:
+            data = json.loads(record.key_findings)
+            if isinstance(data, list):
+                findings = [str(x) for x in data]
+        except (TypeError, json.JSONDecodeError):
+            findings = []
+
+    return WearableDataRecordResponse(
+        id=record.id,
+        patient_id=record.patient_id,
+        source=record.source,
+        upload_date=record.upload_date.isoformat() if record.upload_date else "",
+        date_range_start=record.date_range_start,
+        date_range_end=record.date_range_end,
+        file_size_bytes=record.file_size_bytes,
+        summary=WearableSummary(**parsed_summary) if parsed_summary else None,
+        ai_narrative=record.ai_narrative or "",
+        key_findings=findings,
+    )
+
+
+@router.post("/wearable/upload", response_model=WearableDataRecordResponse)
+async def upload_wearable_data(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Parse an Apple Health / Fitbit / Google Fit export, generate the
+    AI narrative, and persist a WearableDataRecord. Raw bytes are NEVER
+    written to disk — only the structured summary JSON, AI narrative, and
+    key findings end up in the database."""
+    content = await file.read()
+
+    if not validate_file_size(len(content), settings.wearable_max_file_size_mb):
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File too large. Wearable exports are capped at "
+                f"{settings.wearable_max_file_size_mb} MB."
+            ),
+        )
+    if not content:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+    content_type = (file.content_type or "application/octet-stream").lower()
+    filename = safe_filename(file.filename or "wearable_upload")
+
+    if content_type not in _WEARABLE_ALLOWED_MIME:
+        # Be forgiving — fall through to format detection if the extension
+        # looks like one of the supported formats.
+        ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+        if ext not in {"xml", "json", "zip"}:
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    f"Unsupported file type: {content_type}. "
+                    "Allowed: Apple Health XML/ZIP, Fitbit JSON/ZIP, "
+                    "Google Fit JSON/ZIP."
+                ),
+            )
+
+    fmt = detect_wearable_format(filename, content)
+    if fmt not in _WEARABLE_PARSERS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "We could not detect the format of this file. Supported "
+                "formats: Apple Health export (export.zip or export.xml), "
+                "Fitbit data export (ZIP or JSON), Google Takeout fitness "
+                "data (JSON or ZIP)."
+            ),
+        )
+
+    try:
+        # parse_fitbit_json accepts a filename hint so single-file uploads
+        # ("heart_rate-2025-04-12.json") are still routed to the right metric.
+        if fmt == "fitbit":
+            wearable_stats = parse_fitbit_json(content, filename=filename)
+        else:
+            wearable_stats = _WEARABLE_PARSERS[fmt](content)
+    except Exception as exc:
+        # Parser errors should be reported, not swallowed silently. Build a
+        # fallback shell so the patient still sees something useful.
+        logger.exception("Wearable parser raised unexpectedly")
+        from services.wearable_parser_service import _empty_stats  # noqa: WPS433
+
+        wearable_stats = _empty_stats(fmt)
+        wearable_stats["errors"].append(
+            f"Parser hit an unrecoverable error: {exc}"
+        )
+
+    # If nothing parsed, don't waste an LLM call — just return the parser
+    # warnings so the UI can show "we couldn't read this file".
+    parsed_anything = (
+        wearable_stats.get("raw_record_count", 0) > 0
+        or any(
+            wearable_stats.get(k, {}).get("avg") is not None
+            for k in ("heart_rate", "spo2")
+        )
+        or wearable_stats.get("steps", {}).get("daily_avg") is not None
+    )
+
+    narrative_obj = WearableNarrative()
+    if parsed_anything:
+        try:
+            language = getattr(_user, "preferred_language", "en") or "en"
+            narrative = await analyze_wearable_data(wearable_stats, language=language)
+            narrative_obj = WearableNarrative(**narrative)
+        except Exception as exc:
+            logger.warning(f"Wearable narrative generation failed: {exc}")
+
+    record_id = generate_id()
+    record = WearableDataRecord(
+        id=record_id,
+        patient_id=_user.id,
+        source=wearable_stats.get("source", fmt),
+        date_range_start=(wearable_stats.get("date_range") or {}).get("start"),
+        date_range_end=(wearable_stats.get("date_range") or {}).get("end"),
+        file_size_bytes=len(content),
+        summary_json=json.dumps(wearable_stats),
+        ai_narrative=narrative_obj.patient_narrative,
+        key_findings=json.dumps(narrative_obj.key_findings),
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+
+    return _wearable_record_to_response(record, summary=wearable_stats)
+
+
+@router.get(
+    "/{patient_id}/wearable-records",
+    response_model=WearableRecordListResponse,
+)
+async def list_wearable_records(
+    patient_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """List every wearable upload this patient has on file, newest first.
+
+    The summary blob is intentionally NOT returned here — the list view
+    only shows narrative + findings. Use `/patient/wearable/{record_id}`
+    when the patient drills in."""
+    if patient_id != _user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    result = await db.execute(
+        select(WearableDataRecord)
+        .where(WearableDataRecord.patient_id == patient_id)
+        .order_by(WearableDataRecord.upload_date.desc())
+    )
+    records = result.scalars().all()
+
+    items: list[WearableRecordListItem] = []
+    for r in records:
+        try:
+            findings = json.loads(r.key_findings) if r.key_findings else []
+            if not isinstance(findings, list):
+                findings = []
+        except (TypeError, json.JSONDecodeError):
+            findings = []
+        items.append(
+            WearableRecordListItem(
+                id=r.id,
+                source=r.source,
+                upload_date=r.upload_date.isoformat() if r.upload_date else "",
+                date_range_start=r.date_range_start,
+                date_range_end=r.date_range_end,
+                ai_narrative=r.ai_narrative or "",
+                key_findings=[str(x) for x in findings],
+            )
+        )
+
+    return WearableRecordListResponse(patient_id=patient_id, items=items)
+
+
+@router.get(
+    "/wearable/{record_id}",
+    response_model=WearableDataRecordResponse,
+)
+async def get_wearable_record(
+    record_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("patient")),
+):
+    """Full record including the parsed `summary_json` for the metric
+    breakdown UI."""
+    result = await db.execute(
+        select(WearableDataRecord).where(
+            WearableDataRecord.id == record_id,
+            WearableDataRecord.patient_id == _user.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Wearable record not found")
+
+    return _wearable_record_to_response(record)

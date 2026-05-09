@@ -5,6 +5,8 @@ import type {
   PatientAnalysis,
   HistoryListResponse,
   HistoryDetail,
+  WearableDataRecord,
+  WearableRecordListResponse,
 } from '../types/patient.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -92,6 +94,49 @@ export async function getBiomarkerTrends(
 ): Promise<BiomarkerTrendResponse> {
   const { data } = await axios.get<BiomarkerTrendResponse>(
     `${API_BASE}/patient/${encodeURIComponent(patientId)}/biomarker-trends`,
+  );
+  return data;
+}
+
+/* ── Wearable / health-app data ─────────────────────────────────────── */
+
+export async function uploadWearableData(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<WearableDataRecord> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await axios.post<WearableDataRecord>(
+    `${API_BASE}/patient/wearable/upload`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // Wearable exports take a while; allow up to 5 min for parse + AI call.
+      timeout: 5 * 60 * 1000,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      },
+    },
+  );
+  return data;
+}
+
+export async function getWearableRecords(
+  patientId: string,
+): Promise<WearableRecordListResponse> {
+  const { data } = await axios.get<WearableRecordListResponse>(
+    `${API_BASE}/patient/${encodeURIComponent(patientId)}/wearable-records`,
+  );
+  return data;
+}
+
+export async function getWearableRecord(
+  recordId: string,
+): Promise<WearableDataRecord> {
+  const { data } = await axios.get<WearableDataRecord>(
+    `${API_BASE}/patient/wearable/${encodeURIComponent(recordId)}`,
   );
   return data;
 }

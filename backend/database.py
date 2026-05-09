@@ -523,6 +523,42 @@ class FollowUpPlan(Base):
     is_sent_to_patient: Mapped[bool] = mapped_column(Integer, default=False)
 
 
+class WearableDataRecord(Base):
+    """One uploaded wearable / health-app export, summarized.
+
+    The raw export bytes are intentionally NOT stored — the parser runs
+    in-memory at upload time and only the structured `summary_json` (plus
+    the AI narrative + key findings) is persisted. That keeps row sizes
+    manageable for what are typically 50MB+ source files.
+    """
+    __tablename__ = "wearable_data_records"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    patient_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    # "apple_health" | "fitbit" | "google_fit" | "manual_csv"
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    upload_date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Free-text date strings (ISO when we have it, "unknown" when we don't)
+    # so partial / corrupted exports never break ingest.
+    date_range_start: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    date_range_end: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Parsed stats — the standardized dict the parsers return.
+    summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Patient-facing AI narrative (single paragraph).
+    ai_narrative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # JSON list of strings — the most notable observations, surfaced as a
+    # collapsible bullet list in the UI and bullet-injected into Dr. MediSense.
+    key_findings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_wearable_records_patient_uploaded", "patient_id", "upload_date"),
+    )
+
+
 class PatientChatAudit(Base):
     """Append-only audit trail for every patient-chat API access."""
     __tablename__ = "patient_chat_audit"

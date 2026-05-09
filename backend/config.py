@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     upload_dir: str = os.getenv("UPLOAD_DIR", "./tmp/medisense_uploads")
     max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "20"))
     allowed_file_types: str = os.getenv("ALLOWED_FILE_TYPES", "application/pdf,image/jpeg,image/png")
+    # Wearable / health-app exports (Apple Health XML, Fitbit / Google Fit
+    # JSON or ZIP) are usually 5–100MB so they get a separate, larger limit.
+    wearable_max_file_size_mb: int = int(os.getenv("WEARABLE_MAX_FILE_SIZE_MB", "50"))
 
     # ── Speech / NLP ──────────────────────────────────────────────────────
     whisper_model: str = os.getenv("WHISPER_MODEL", "google/gemini-3-flash-preview")
