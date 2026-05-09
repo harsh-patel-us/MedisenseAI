@@ -1,5 +1,10 @@
 import axios from 'axios';
-import type { GoogleInviteStatus } from '../types/consultation.types';
+import type {
+  GoogleInviteStatus,
+  IntakeFormData,
+  IntakeSubmitData,
+  IntakeSummary,
+} from '../types/consultation.types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -32,6 +37,8 @@ export interface ScheduledMeeting {
   google_event_link?: string | null;
   google_invite_status?: GoogleInviteStatus;
   google_invite_error?: string | null;
+  intake_url?: string | null;
+  intake_submitted?: boolean;
 }
 
 export interface LinkConferenceRequest {
@@ -135,6 +142,33 @@ export async function getProcessStatus(
 export async function listUnprocessedSessions(): Promise<UnprocessedSession[]> {
   const { data } = await axios.get<UnprocessedSession[]>(
     `${API_BASE}/meet/sessions/unprocessed`,
+  );
+  return data;
+}
+
+/* ── Pre-visit intake form ─────────────────────────────────────────── */
+
+export async function getIntakeForm(token: string): Promise<IntakeFormData> {
+  const { data } = await axios.get<IntakeFormData>(
+    `${API_BASE}/meet/intake/${encodeURIComponent(token)}`,
+  );
+  return data;
+}
+
+export async function submitIntakeForm(
+  token: string,
+  payload: IntakeSubmitData,
+): Promise<{ message: string }> {
+  const { data } = await axios.post<{ message: string }>(
+    `${API_BASE}/meet/intake/${encodeURIComponent(token)}/submit`,
+    payload,
+  );
+  return data;
+}
+
+export async function getIntakeSummary(sessionId: string): Promise<IntakeSummary> {
+  const { data } = await axios.get<IntakeSummary>(
+    `${API_BASE}/meet/sessions/${encodeURIComponent(sessionId)}/intake-summary`,
   );
   return data;
 }

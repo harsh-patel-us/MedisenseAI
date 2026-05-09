@@ -16,8 +16,11 @@ import {
   listUnprocessedSessions,
   processTranscript,
   getProcessStatus,
+  getIntakeSummary,
 } from '../api/meetApi';
 import type { UnprocessedSession, ProcessStatusResponse } from '../api/meetApi';
+import type { IntakeSummary } from '../types/consultation.types';
+import axios from 'axios';
 import { listSpecialties } from '../api/patientChatbotApi';
 import type { SpecialtyOption } from '../types/patientChatbot.types';
 import { updateMySpecialty } from '../api/authApi';
@@ -592,6 +595,7 @@ export default function DoctorDashboard() {
                 ✕ Close
               </button>
             </div>
+            {meetSessionId && <IntakePreviewPanel sessionId={meetSessionId} />}
             <SoapNoteEditor
               soapNote={meetSoapNote}
               sessionId={meetSessionId}
@@ -603,6 +607,9 @@ export default function DoctorDashboard() {
         )}
       </div>
 
+      {/* The intake summary panel for the active Meet processing session
+          is rendered inside the SOAP block below; this section is just the
+          specialty onboarding card. */}
       {!user?.specialty && (
         <div style={{ marginTop: 32 }}>
           <div
@@ -654,6 +661,248 @@ export default function DoctorDashboard() {
         </div>
       )}
 
+    </div>
+  );
+}
+
+/* ── Pre-visit intake summary panel ────────────────────────────────────
+   Renders the AI-generated context paragraph the patient's intake form
+   produced. Hidden entirely when the patient has not yet submitted (the
+   API returns 404 in that case). Collapsible "raw answers" toggle so the
+   doctor can verify what was actually said. */
+function IntakePreviewPanel({ sessionId }: { sessionId: string }) {
+  const [data, setData] = useState<IntakeSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setMissing(false);
+    setData(null);
+    (async () => {
+      try {
+        const res = await getIntakeSummary(sessionId);
+        if (!cancelled) setData(res);
+      } catch (err) {
+        if (cancelled) return;
+        const status = axios.isAxiosError(err) ? err.response?.status : 0;
+        if (status === 404) setMissing(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  if (missing) return null;
+  if (loading) {
+    return (
+      <div
+        className="glass-card"
+        style={{
+          padding: '16px 20px',
+          marginBottom: 16,
+          fontSize: '0.85rem',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <span
+          className="spinner"
+          style={{
+            width: 14,
+            height: 14,
+            borderWidth: 2,
+            display: 'inline-block',
+            verticalAlign: 'middle',
+            marginRight: 8,
+          }}
+        />
+        Loading pre-visit intake…
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  const summary = data.intake_summary;
+  const answers = data.intake_data?.answers || {};
+  const submitted = data.submitted_at
+    ? new Date(data.submitted_at).toLocaleString()
+    : null;
+
+  return (
+    <div
+      className="glass-card"
+      style={{
+        padding: '18px 22px',
+        marginBottom: 16,
+        borderLeft: '4px solid var(--brand-teal)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          flexWrap: 'wrap',
+          marginBottom: collapsed ? 0 : 12,
+        }}
+      >
+        <div>
+          <h3
+            style={{
+              fontSize: '0.95rem',
+              fontWeight: 800,
+              marginBottom: 2,
+            }}
+          >
+            📝 Pre-Visit Intake Summary
+            {data.intake_data?.patient_name && (
+              <span
+                style={{
+                  marginLeft: 10,
+                  fontSize: '0.78rem',
+                  color: 'var(--text-secondary)',
+                  fontWeight: 600,
+                }}
+              >
+                — {data.intake_data.patient_name}
+              </span>
+            )}
+          </h3>
+          {submitted && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              Submitted {submitted}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--text-secondary)',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            padding: '6px 12px',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+        >
+          {collapsed ? '▼ Show' : '▲ Hide'}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <div>
+          {summary ? (
+            <p
+              style={{
+                fontSize: '0.92rem',
+                color: 'var(--text-primary)',
+                lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+                margin: 0,
+              }}
+            >
+              {summary}
+            </p>
+          ) : (
+            <p
+              style={{
+                fontSize: '0.85rem',
+                color: 'var(--text-muted)',
+                fontStyle: 'italic',
+                margin: 0,
+              }}
+            >
+              Summary is still generating — refresh in a few seconds, or view
+              raw answers below.
+            </p>
+          )}
+
+          <button
+            onClick={() => setShowRaw((s) => !s)}
+            style={{
+              marginTop: 14,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--brand-teal)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            {showRaw ? '▲ Hide raw answers' : '▼ Show raw answers'}
+          </button>
+
+          {showRaw && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'rgba(15,30,60,0.4)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              {Object.keys(answers).length === 0 ? (
+                <span
+                  style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--text-muted)',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  No answers recorded.
+                </span>
+              ) : (
+                Object.entries(answers)
+                  .sort((a, b) => Number(a[0]) - Number(b[0]))
+                  .map(([idx, ans]) => (
+                    <div key={idx}>
+                      <div
+                        style={{
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                          color: 'var(--brand-teal)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.4px',
+                          marginBottom: 2,
+                        }}
+                      >
+                        Question {Number(idx) + 1}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '0.88rem',
+                          color: 'var(--text-primary)',
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {ans || (
+                          <em style={{ color: 'var(--text-muted)' }}>
+                            (skipped)
+                          </em>
+                        )}
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

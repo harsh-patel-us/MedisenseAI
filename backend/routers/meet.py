@@ -48,6 +48,11 @@ from services.followup_service import (
     extract_followup_from_soap,
     resolve_patient_id,
 )
+from services.intake_service import (
+    INTAKE_FORM_QUESTIONS,
+    generate_intake_token,
+    process_intake_submission,
+)
 from services.google_calendar import (
     CalendarEventResult,
     _platform_credentials,
@@ -113,10 +118,35 @@ class ScheduledMeetingDTO(BaseModel):
     google_event_link: Optional[str] = None
     google_invite_status: str = "skipped"  # "sent" | "skipped" | "failed"
     google_invite_error: Optional[str] = None
+    intake_url: Optional[str] = None
+    intake_submitted: bool = False
 
 
 class ScheduledListResponse(BaseModel):
     meetings: list[ScheduledMeetingDTO]
+
+
+class IntakeFormResponse(BaseModel):
+    session_id: str
+    questions: list[str]
+    patient_name: Optional[str] = None
+    already_submitted: bool = False
+
+
+class IntakeSubmitRequest(BaseModel):
+    patient_name: str = Field(default="", max_length=200)
+    answers: dict[str, str] = Field(default_factory=dict)
+
+
+class IntakeSubmitResponse(BaseModel):
+    message: str
+
+
+class IntakeSummaryResponse(BaseModel):
+    session_id: str
+    intake_data: Optional[dict] = None
+    intake_summary: Optional[str] = None
+    submitted_at: Optional[datetime] = None
 
 
 class LinkConferenceRequest(BaseModel):
@@ -168,6 +198,10 @@ class UnprocessedSessionDTO(BaseModel):
 
 
 def _row_to_meeting_dto(row: ConsultationSession) -> ScheduledMeetingDTO:
+    intake_url: Optional[str] = None
+    if row.intake_token:
+        base = (settings.frontend_url or "").rstrip("/")
+        intake_url = f"{base}/intake/{row.intake_token}"
     return ScheduledMeetingDTO(
         session_id=row.id,
         doctor_name=row.doctor_name or "Doctor",
@@ -185,6 +219,8 @@ def _row_to_meeting_dto(row: ConsultationSession) -> ScheduledMeetingDTO:
         google_event_link=row.google_event_link,
         google_invite_status=row.google_invite_status or "skipped",
         google_invite_error=row.google_invite_error,
+        intake_url=intake_url,
+        intake_submitted=row.intake_submitted_at is not None,
     )
 
 
@@ -295,6 +331,7 @@ async def schedule_meeting(
             google_event_link=event_link,
             google_invite_status=invite_status,
             google_invite_error=invite_error,
+            intake_token=generate_intake_token(),
         )
 
         # If we got a Meet link, derive the conference id so the doctor dashboard
@@ -733,6 +770,141 @@ async def _run_meet_pipeline(task_id: str, session_id: str, conference_id: str) 
                     await db.commit()
             except Exception:
                 pass
+
+
+# ── Pre-visit intake form endpoints ──────────────────────────────────────
+
+
+@router.get("/intake/{token}", response_model=IntakeFormResponse)
+async def get_intake_form(
+    token: str = Path(..., max_length=128),
+    db: AsyncSession = Depends(get_db),
+) -> IntakeFormResponse:
+    """Public — no auth. Returns the questions to render and whether the
+    form has already been submitted (so the page can short-circuit to a
+    thank-you state instead of accepting a duplicate)."""
+    row = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.intake_token == token
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Intake link not found.")
+
+    already = row.intake_submitted_at is not None
+    if already:
+        # Spec: 410 Gone for an already-consumed link. The frontend treats
+        # 410 as "show the thank-you message".
+        raise HTTPException(
+            status_code=410,
+            detail="This intake form has already been submitted.",
+        )
+
+    return IntakeFormResponse(
+        session_id=row.id,
+        questions=INTAKE_FORM_QUESTIONS,
+        patient_name=row.patient_name,
+        already_submitted=False,
+    )
+
+
+@router.post("/intake/{token}/submit", response_model=IntakeSubmitResponse)
+async def submit_intake_form(
+    payload: IntakeSubmitRequest,
+    background: BackgroundTasks,
+    token: str = Path(..., max_length=128),
+    db: AsyncSession = Depends(get_db),
+) -> IntakeSubmitResponse:
+    """Public — no auth. Records the submission *synchronously* (so the
+    token is consumed before we return) but kicks the LLM summarization
+    off into a background task so the patient gets an instant 200."""
+    row = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.intake_token == token
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Intake link not found.")
+    if row.intake_submitted_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail="This intake form has already been submitted.",
+        )
+
+    # Persist the patient-supplied name on the consultation row when the
+    # original schedule didn't include it.
+    name = (payload.patient_name or "").strip()
+    if name and (not row.patient_name or row.patient_name == "Patient"):
+        row.patient_name = name
+
+    intake_data = {
+        "patient_name": name or row.patient_name or "",
+        "answers": payload.answers or {},
+    }
+
+    # Mark the token consumed up-front so re-posts hit 410 even if the
+    # background summary task is still running.
+    row.intake_data = json.dumps(intake_data)
+    row.intake_submitted_at = datetime.utcnow()
+    session_id = row.id
+    await db.commit()
+
+    background.add_task(
+        process_intake_submission,
+        session_id,
+        intake_data,
+        _claude_service_module,
+        None,
+    )
+
+    return IntakeSubmitResponse(
+        message="Thank you! Your doctor has been notified.",
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/intake-summary",
+    response_model=IntakeSummaryResponse,
+)
+async def get_intake_summary(
+    session_id: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("doctor")),
+) -> IntakeSummaryResponse:
+    """Doctor-only. Returns the AI summary plus the raw answers so the UI
+    can render a 'see raw answers' toggle. 404 if no submission yet so the
+    dashboard can hide the panel without printing an error."""
+    row = (
+        await db.execute(
+            select(ConsultationSession).where(
+                ConsultationSession.id == session_id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Consultation session not found.")
+    if row.doctor_id and row.doctor_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your consultation.")
+    if row.intake_submitted_at is None:
+        raise HTTPException(status_code=404, detail="No intake submission yet.")
+
+    raw: Optional[dict] = None
+    if row.intake_data:
+        try:
+            raw = json.loads(row.intake_data)
+        except json.JSONDecodeError:
+            raw = None
+
+    return IntakeSummaryResponse(
+        session_id=row.id,
+        intake_data=raw,
+        intake_summary=row.intake_summary,
+        submitted_at=row.intake_submitted_at,
+    )
 
 
 # ── Google Meet API helpers ──────────────────────────────────────────────

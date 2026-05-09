@@ -143,6 +143,7 @@ export default function SchedulePage() {
   const [error, setError] = useState('');
   const [created, setCreated] = useState<ScheduledMeeting | null>(null);
   const [copyOk, setCopyOk] = useState(false);
+  const [intakeCopyOk, setIntakeCopyOk] = useState(false);
 
   const [upcoming, setUpcoming] = useState<ScheduledMeeting[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
@@ -235,6 +236,16 @@ export default function SchedulePage() {
     }
   }
 
+  async function copyIntakeLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setIntakeCopyOk(true);
+      setTimeout(() => setIntakeCopyOk(false), 1800);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function resetForm() {
     setCreated(null);
     setCopyOk(false);
@@ -279,6 +290,8 @@ export default function SchedulePage() {
                 meeting={created}
                 copyOk={copyOk}
                 onCopy={copyLink}
+                intakeCopyOk={intakeCopyOk}
+                onCopyIntake={copyIntakeLink}
                 onReset={resetForm}
               />
             ) : (
@@ -493,11 +506,13 @@ export default function SchedulePage() {
 /* ── Success panel ───────────────────────────────────────────────────── */
 
 function SuccessPanel({
-  meeting, copyOk, onCopy, onReset,
+  meeting, copyOk, onCopy, intakeCopyOk, onCopyIntake, onReset,
 }: {
   meeting: ScheduledMeeting;
   copyOk: boolean;
   onCopy: (url: string) => void;
+  intakeCopyOk: boolean;
+  onCopyIntake: (url: string) => void;
   onReset: () => void;
 }) {
   return (
@@ -548,6 +563,50 @@ function SuccessPanel({
               style={{ padding: '10px 16px', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
             >
               {copyOk ? '✓ Copied' : '📋 Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pre-visit intake form link */}
+      {meeting.intake_url && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: '14px 16px',
+            borderRadius: 12,
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid rgba(13, 148, 136, 0.3)',
+          }}
+        >
+          <div style={{ ...labelStyle, marginBottom: 6 }}>
+            📝 Pre-Visit Intake Form
+          </div>
+          <p
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.5,
+              marginBottom: 10,
+            }}
+          >
+            Send this link to your patient before the call. They'll answer a
+            few quick questions and you'll see a clinical summary on your
+            dashboard before the consultation begins.
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              readOnly
+              value={meeting.intake_url}
+              onFocus={e => e.target.select()}
+              style={{ ...inputStyle, fontSize: '0.82rem', flex: 1 }}
+            />
+            <button
+              onClick={() => onCopyIntake(meeting.intake_url!)}
+              className="btn-secondary"
+              style={{ padding: '10px 16px', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+            >
+              {intakeCopyOk ? '✓ Copied' : '📋 Copy'}
             </button>
           </div>
         </div>

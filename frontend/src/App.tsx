@@ -15,6 +15,7 @@ import ScrollToTop from './components/ScrollToTop';
 import ChatbotWidget from './components/ChatbotWidget';
 import PatientChat from './pages/PatientChat';
 import PatientReportUpload from './pages/PatientReportUpload';
+import IntakeForm from './pages/IntakeForm';
 import UseCasesPage from './pages/UseCasesPage';
 import FeaturesPage from './pages/FeaturesPage';
 import PricingPage from './pages/PricingPage';
@@ -972,6 +973,9 @@ export default function App() {
           <Route path="/resources" element={<PublicOnly><ResourcesPage /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
           <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+          {/* Pre-visit intake form — public, link-authenticated; renders even
+              for logged-in users (in case a doctor opens their own link). */}
+          <Route path="/intake/:token" element={<IntakeForm />} />
           <Route
             path="/doctor"
             element={

@@ -173,6 +173,18 @@ class ConsultationSession(Base):
     google_invite_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     google_invite_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── Pre-visit intake form ───────────────────────────────────────────
+    # Single-use, public-shareable token issued at scheduling time. The
+    # patient opens /intake/{token} to fill the form before the call;
+    # intake_submitted_at flips it to "consumed" and intake_summary stores
+    # the AI-generated clinical paragraph the doctor sees on the dashboard.
+    intake_token: Mapped[Optional[str]] = mapped_column(
+        String, unique=True, nullable=True, index=True
+    )
+    intake_submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    intake_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # JSON
+    intake_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
 
 class ChatbotSession(Base):
     """Persistent transcript for the website chatbot widget.
@@ -564,6 +576,10 @@ async def init_db():
                 ("google_event_link", "VARCHAR"),
                 ("google_invite_status", "VARCHAR"),
                 ("google_invite_error", "TEXT"),
+                ("intake_token", "VARCHAR"),
+                ("intake_submitted_at", "TIMESTAMP"),
+                ("intake_data", "TEXT"),
+                ("intake_summary", "TEXT"),
             ],
             "patient_analyses": [
                 ("patient_id", "VARCHAR"),
