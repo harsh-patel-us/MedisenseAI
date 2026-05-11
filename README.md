@@ -1,7 +1,7 @@
 # MediSense AI 🩺
 
 > **AI-Powered Health Intelligence Platform**  
-> *From consultation to care — audio to SOAP notes for doctors, lab reports to health guides for patients, and an AI medical companion that remembers everything.*
+> *From consultation to care — audio to SOAP notes for doctors, lab reports to health guides for patients, an AI medical companion that remembers everything, and a multilingual experience for English plus 10 Indian languages.*
 
 **All AI/ML runs via cloud APIs** (OpenRouter, Sarvam AI, Google) — no models are downloaded or executed locally.
 
@@ -74,7 +74,16 @@ python scripts/setup_google_calendar.py
 
 ---
 
-### 4. Generate Demo Reports (Optional)
+### 4. Bundle a Unicode font for non-English PDFs (Optional, recommended for production)
+
+Drop `NotoSans-Regular.ttf` and `NotoSans-Bold.ttf` into `backend/fonts/`. The PDF
+exporter picks them up first when registering the Unicode font family. On Windows
+the system-installed `Nirmala.ttc` (pan-Indic) is auto-detected as a fallback —
+no action needed for local development.
+
+---
+
+### 5. Generate Demo Reports (Optional)
 
 ```bash
 # From the project root
@@ -87,7 +96,7 @@ This creates 3 realistic PDF lab reports in `demo/sample_reports/` for testing:
 - `low_haemoglobin_cbc.pdf` — Iron deficiency anaemia
 - `liver_function_test.pdf` — Hepatic stress markers
 
-### 5. Generate Demo Doctor/Patient Audio (Optional)
+### 6. Generate Demo Doctor/Patient Audio (Optional)
 
 ```bash
 # From the project root
@@ -108,18 +117,14 @@ test the end-to-end transcription → SOAP-note flow.
 MediSenseAI/
 ├── backend/                  # FastAPI Python backend
 │   ├── main.py               # App entry point (lifespan, CORS, routers)
-│   ├── config.py             # Settings loaded from .env (no prompts)
-│   ├── database.py           # Async ORM (7 tables, SQLite or Postgres)
-│   │                         # ConsultationSession now also persists scheduling
-│   │                         # fields: scheduled_at, duration_minutes, reason,
-│   │                         # patient_email, doctor_email, organizer_id,
-│   │                         # organizer_role, meet_link, google_event_id,
-│   │                         # google_event_link, google_invite_status, error
+│   ├── config.py             # Settings + SUPPORTED_LANGUAGES + normalize_language()
+│   ├── database.py           # Async ORM (15 tables, SQLite or Postgres)
 │   ├── requirements.txt
 │   │
-│   ├── prompts/              # AI prompt templates (plain-text files)
+│   ├── prompts/              # 20 AI prompt templates (plain-text files)
 │   │   ├── __init__.py       # Loader — reads .txt files, exports constants
 │   │   ├── soap_note.txt
+│   │   ├── soap_audit.txt
 │   │   ├── report_analysis.txt
 │   │   ├── summary_specialist.txt
 │   │   ├── lifestyle_guide.txt
@@ -127,39 +132,58 @@ MediSenseAI/
 │   │   ├── patient_chatbot_system.txt
 │   │   ├── patient_chatbot_summary.txt
 │   │   ├── chatbot_system.txt
-│   │   └── safety_system.txt
+│   │   ├── safety_system.txt
+│   │   ├── language_instruction.txt          # multilingual directive
+│   │   ├── medication_extraction.txt
+│   │   ├── medication_interaction.txt
+│   │   ├── adherence_reminder.txt
+│   │   ├── biomarker_extraction.txt
+│   │   ├── wearable_narrative.txt
+│   │   ├── intake_summary.txt
+│   │   ├── followup_extraction.txt
+│   │   └── emergency_screening.txt
 │   │
-│   ├── routers/
-│   │   ├── auth.py           # JWT register/login/me
-│   │   ├── doctor.py         # Audio file upload + SOAP endpoints + sessions list
-│   │   │                     # (legacy WebSocket /stream-audio still defined,
-│   │   │                     #  but unused — dashboard now uses /upload-audio)
-│   │   ├── patient.py        # Report upload, analysis, PDF export, history
+│   ├── routers/              # 8 routers, all mounted under /api
+│   │   ├── auth.py           # JWT auth + language + profile + specialty
+│   │   ├── doctor.py         # Audio upload, SOAP, audit, follow-up, sessions, doctor↔patient chat
+│   │   ├── patient.py        # Report upload/analyze/PDF/history, biomarker trends, wearables
+│   │   ├── medications.py    # Medication CRUD + interaction alerts + reminder feed
 │   │   ├── chatbot.py        # Website support chatbot widget
-│   │   ├── patient_chatbot.py # Medisense AI persistent patient chatbot
-│   │   ├── meet.py           # Google Meet scheduling + transcript processing
+│   │   ├── patient_chatbot.py # Medisense AI persistent chat + WebSocket takeover
+│   │   ├── meet.py           # Google Meet schedule + process + intake form
 │   │   └── google_oauth.py   # Google Calendar OAuth flow
 │   │
-│   ├── services/
-│   │   ├── claude_service.py     # All LLM calls via OpenRouter + vision OCR
-│   │   ├── transcription.py     # STT (Gemini Flash via OpenRouter)
-│   │   ├── diarization.py       # Speaker labeling (pause-based heuristic)
-│   │   ├── ner.py               # Medical NER (regex keyword matching)
-│   │   ├── report_parser.py     # PDF text extraction (PyMuPDF + vision OCR)
-│   │   ├── pdf_export.py        # PDF generation (ReportLab)
-│   │   ├── auth_service.py      # Password hashing + JWT
-│   │   ├── chatbot_agent.py     # Website chatbot multi-agent system
-│   │   ├── patient_chatbot.py   # Medisense AI agent + memory
-│   │   ├── google_calendar.py   # Google Calendar + Meet link creation
-│   │   ├── sarvam_stt_service.py # Sarvam AI speech-to-text
-│   │   └── sarvam_tts_service.py # Sarvam AI text-to-speech
+│   ├── services/             # 22 service modules
+│   │   ├── claude_service.py        # All LLM calls via OpenRouter + vision OCR
+│   │   ├── transcription.py         # STT (Gemini Flash via OpenRouter)
+│   │   ├── diarization.py           # Speaker labeling (pause-based heuristic)
+│   │   ├── ner.py                   # Medical NER (regex keyword matching)
+│   │   ├── report_parser.py         # PDF text extraction (PyMuPDF + vision OCR)
+│   │   ├── pdf_export.py            # PDF generation with Unicode font family
+│   │   ├── auth_service.py          # Password hashing + JWT + role guards
+│   │   ├── chatbot_agent.py         # Website chatbot multi-agent system
+│   │   ├── patient_chatbot.py       # Medisense AI agent + memory
+│   │   ├── chat_ws.py               # Doctor↔patient WebSocket bus
+│   │   ├── medication_service.py    # Medication tracking + interaction checks
+│   │   ├── biomarker_service.py     # Biomarker extraction + trends
+│   │   ├── intake_service.py        # Pre-visit intake form + AI summary
+│   │   ├── followup_service.py      # Follow-up extraction + PDF
+│   │   ├── wearable_parser_service.py  # Apple/Fitbit/Google Fit ingestion
+│   │   ├── emergency_screening_service.py  # Red-flag screening
+│   │   ├── soap_audit_service.py    # SOAP note re-grading
+│   │   ├── specialties.py           # Doctor specialty registry + routing
+│   │   ├── google_calendar.py       # Google Calendar + Meet link creation
+│   │   ├── sarvam_stt_service.py    # Sarvam AI speech-to-text
+│   │   └── sarvam_tts_service.py    # Sarvam AI text-to-speech
 │   │
-│   ├── models/
+│   ├── models/               # Pydantic request/response schemas
 │   │   ├── auth_models.py
 │   │   ├── doctor_models.py
 │   │   ├── patient_models.py
 │   │   ├── chatbot_models.py
 │   │   └── patient_chatbot_models.py
+│   │
+│   ├── fonts/                # Optional: drop NotoSans-Regular/Bold.ttf for prod
 │   │
 │   ├── scripts/
 │   │   └── setup_google_calendar.py  # One-time Google OAuth setup
@@ -175,38 +199,44 @@ MediSenseAI/
 │       ├── index.css         # Glassmorphism design system (vanilla CSS)
 │       ├── main.tsx          # React entry point
 │       │
-│       ├── pages/
-│       │   ├── Login.tsx / Register.tsx        # Auth
-│       │   ├── DoctorDashboard.tsx             # Audio file upload → SOAP workflow + Meet processing
-│       │   ├── PatientDashboard.tsx            # Report → health guide
-│       │   ├── PatientChat.tsx                 # Medisense AI chatbot
-│       │   ├── SchedulePage.tsx                # Doctor + patient scheduling
-│       │   │                                   # (Google Calendar + Meet link)
-│       │   └── AboutPage, ContactPage, FeaturesPage, UseCasesPage,
-│       │       PricingPage, SecurityPage, IntegrationsPage, ResourcesPage
+│       ├── pages/            # 18 pages (no in-app video room)
+│       │   ├── Login.tsx / Register.tsx          # Auth
+│       │   ├── ProfilePage.tsx                   # Profile + language + specialty
+│       │   ├── DoctorDashboard.tsx               # Audio → SOAP + audit + follow-up + Meet processing
+│       │   ├── DoctorChat.tsx                    # Live doctor↔patient chat console
+│       │   ├── PatientDashboard.tsx              # Patient landing (recent reports, alerts)
+│       │   ├── PatientReportUpload.tsx           # 7-tab report results
+│       │   ├── PatientChat.tsx                   # Medisense AI chatbot + specialist picker
+│       │   ├── IntakeForm.tsx                    # Public pre-visit intake form
+│       │   ├── SchedulePage.tsx                  # Doctor + patient scheduling
+│       │   └── 8 marketing pages (About, Contact, Features, UseCases,
+│       │                          Pricing, Security, Integrations, Resources)
 │       │
 │       ├── components/
-│       │   ├── ChatbotWidget.tsx               # Floating visitor chatbot
-│       │   ├── ProtectedRoute.tsx              # Role-based route guard
+│       │   ├── ChatbotWidget.tsx                 # Floating visitor chatbot
+│       │   ├── ProtectedRoute.tsx                # Role-based route guard
 │       │   ├── ScrollToTop.tsx
-│       │   ├── doctor/       # AudioFileUpload, TranscriptView, SoapNoteEditor
-│       │   │                 # (older AudioRecorder + LiveTranscript files
-│       │   │                 #  remain on disk but are no longer imported)
-│       │   └── patient/      # ReportUploader, ReportSummary, SpecialistGuide,
-│       │                     # DietExercisePlan, PrecautionsList
+│       │   ├── LanguageSelector.tsx              # Pickable in profile + chat header
+│       │   ├── doctor/      # AudioFileUpload, TranscriptView, SoapNoteEditor,
+│       │   │                # SoapAuditPanel, FollowUpCard, DoctorLayout,
+│       │   │                # DoctorSidebar, DoctorChatView, DoctorChatOverlay
+│       │   └── patient/     # ReportUploader, ReportSummary, SpecialistGuide,
+│       │                    # DietExercisePlan, PrecautionsList, MedicationTracker,
+│       │                    # LabTrendChart, WearableUploader, EmergencyAlert,
+│       │                    # PatientLayout, PatientSidebar
 │       │
-│       ├── api/              # authApi, doctorApi, patientApi,
-│       │                     # chatbotApi, patientChatbotApi,
-│       │                     # meetApi, googleIntegrationApi
-│       ├── contexts/         # AuthContext (user, token, login/logout)
-│       ├── hooks/            # useAudioRecorder, useWebSocket
-│       └── types/            # auth, doctor, patient, consultation (Google
-│                             # types only), chatbot, patientChatbot
+│       ├── api/             # 9 modules: authApi, doctorApi, doctorChatApi,
+│       │                    # patientApi, medicationApi, chatbotApi,
+│       │                    # patientChatbotApi, meetApi, googleIntegrationApi
+│       ├── contexts/        # AuthContext (user, token, login/logout, setUser)
+│       ├── hooks/           # useAudioRecorder, useWebSocket
+│       └── types/           # auth, doctor, patient, medication,
+│                            # consultation (Google + intake), chatbot, patientChatbot
 │
 └── demo/
-    ├── sample_reports/       # PDF lab reports for testing
-    ├── sample_transcripts/   # Consultation scripts
-    ├── sample_audio/         # Doctor/patient demo MP3 + ground-truth script
+    ├── sample_reports/      # PDF lab reports for testing
+    ├── sample_transcripts/  # Consultation scripts
+    ├── sample_audio/        # Doctor/patient demo MP3 + ground-truth script
     ├── generate_sample_reports.py
     └── generate_sample_audio.py
 ```
@@ -224,9 +254,13 @@ MediSenseAI/
 | Medical NER (symptoms, drugs, diagnoses) — regex extraction | ✅ |
 | AI SOAP note generation | ✅ |
 | Editable note editor with 4 sections | ✅ |
+| **SOAP audit panel** (LLM re-grades the generated note) | ✅ |
+| **Follow-up card** (AI-extracted tasks + downloadable plan + send-to-patient) | ✅ |
 | Copy to clipboard | ✅ |
 | PDF export | ✅ |
 | Session history | ✅ |
+| **Live doctor↔patient chat** with AI takeover toggle | ✅ |
+| **Pre-visit intake summary** shown above the SOAP note | ✅ |
 | Google Meet transcript processing | ✅ |
 | ~~Browser microphone recording with live WebSocket streaming~~ | ❌ Removed — replaced by upload flow |
 
@@ -242,7 +276,13 @@ MediSenseAI/
 | Personalized diet plan | ✅ |
 | Safe exercise plan | ✅ |
 | Daily precautions + emergency signs | ✅ |
-| PDF health guide export | ✅ |
+| **Medication tracker + drug interaction alerts** | ✅ |
+| **Biomarker trend charts** | ✅ |
+| **Wearable / health-app data ingestion** (Apple Health, Fitbit, Google Fit) | ✅ |
+| **Emergency screening** (red-flag detection) | ✅ |
+| **Pre-visit intake form** (token-gated public link) | ✅ |
+| PDF health guide export (Unicode-safe across all 11 supported languages) | ✅ |
+| Past reports list with View / File / PDF actions | ✅ |
 
 ### Patient AI Chatbot (Medisense AI)
 | Feature | Status |
@@ -251,12 +291,23 @@ MediSenseAI/
 | Session sidebar with grouped history (Today, Yesterday, etc.) | ✅ |
 | Auto-generated session titles from first message | ✅ |
 | Auto-generated session summaries (every N messages + on close) | ✅ |
-| Memory injection (past sessions + uploaded reports) | ✅ |
+| Memory injection (past sessions + uploaded reports + active medications) | ✅ |
 | File attachments (images + PDFs) with vision AI analysis | ✅ |
 | Voice input via Sarvam AI STT (with Gemini Flash fallback) | ✅ |
 | Voice output via Sarvam AI TTS (bulbul:v3) | ✅ |
 | Animated "thinking" indicator (shimmer + bouncing dots) | ✅ |
+| **Doctor specialty / specific-doctor picker** | ✅ |
+| **Live doctor takeover** via WebSocket (AI-off toggle) | ✅ |
 | Medical safety guardrails | ✅ |
+
+### Multilingual
+| Feature | Status |
+|---------|--------|
+| English + 10 Indic languages (Hindi, Gujarati, Bengali, Tamil, Telugu, Marathi, Kannada, Malayalam, Punjabi, Urdu) | ✅ |
+| Per-user `preferred_language` setting | ✅ |
+| Per-call language directive injected into every LLM prompt | ✅ |
+| Unicode-safe PDF generation (Nirmala UI on Windows / NotoSans bundle elsewhere) | ✅ |
+| Language picker in patient chat header + profile page | ✅ |
 
 ### Video Consultations (Google Meet)
 | Feature | Status |
@@ -264,9 +315,10 @@ MediSenseAI/
 | Schedule a consultation (doctor **or** patient) | ✅ |
 | Google Calendar event with auto-generated Meet link | ✅ |
 | Email invite to the other party (when calendar invite is configured) | ✅ |
+| **Pre-visit intake URL generated automatically** | ✅ |
 | Upcoming-meetings list with one-click "Join Google Meet" / "Open in Calendar" | ✅ |
 | Auto-link the Meet conference id to the consultation session | ✅ |
-| Doctor-side Meet transcript processing (diarization → NER → SOAP) | ✅ |
+| Doctor-side Meet transcript processing (diarization → NER → SOAP → audit → follow-up) | ✅ |
 | Patient-friendly post-call explanation generated from the transcript | ✅ |
 | Webhook (`POST /meet/webhook`, HMAC-SHA256) for "meeting ended" auto-processing | ✅ |
 | ~~In-app WebRTC video room with 6-character join code~~ | ❌ Removed — Google Meet only |
@@ -275,8 +327,10 @@ MediSenseAI/
 | Feature | Status |
 |---------|--------|
 | JWT authentication (doctor/patient roles) | ✅ |
+| Profile editing + profile-pic upload + doctor specialty | ✅ |
 | Protected routes with role-based access | ✅ |
 | Responsive glassmorphism UI | ✅ |
+| Dedicated patient + doctor sidebars / layouts | ✅ |
 | Marketing landing page with interactive demo | ✅ |
 | Floating chatbot widget for visitors | ✅ |
 | 8 marketing pages (Features, Pricing, Security, etc.) | ✅ |
@@ -311,6 +365,7 @@ ENVIRONMENT=development
 UPLOAD_DIR=./tmp/medisense_uploads
 MAX_FILE_SIZE_MB=20
 ALLOWED_FILE_TYPES=application/pdf,image/jpeg,image/png
+WEARABLE_MAX_FILE_SIZE_MB=50
 
 # ── Speech-to-text model ─────────────────────
 WHISPER_MODEL=google/gemini-2.5-flash
@@ -359,38 +414,46 @@ SARVAM_TTS_LANGUAGE=en-IN
 ## 📋 Demo Scenarios
 
 ### Scenario 1 — Doctor Side (Audio Upload)
-1. Register/login as a **doctor**
+1. Register/login as a **doctor** (set your specialty during onboarding)
 2. Generate the demo audio: `pip install gTTS && python demo/generate_sample_audio.py`
 3. Go to **Doctor Dashboard** → **Upload Consultation Audio** card
 4. Select `demo/sample_audio/doctor_patient_demo.mp3` (or any consultation recording up to 20 MB)
 5. Click **Transcribe Audio** → wait for the transcript to appear
-6. Click **Generate SOAP Note** → review and edit → **Download PDF**
+6. Click **Generate SOAP Note** → review and edit → check the **SOAP audit** panel and **Follow-up** card → **Download PDF**
 7. Click **Upload Another Audio File** to start a new session
 
 ### Scenario 2 — Patient Side (Diabetes Report)
-1. Register/login as a **patient**
-2. Go to **Patient Dashboard**
+1. Register/login as a **patient** (pick a preferred language during signup or in Profile)
+2. Go to **Patient Dashboard** → click "Upload Report"
 3. Upload `demo/sample_reports/diabetes_blood_report.pdf`
-4. View all 4 tabs: Summary, Specialists, Diet & Exercise, Precautions
-5. Click **Download PDF** to get the health guide
+4. Watch the continuous **Upload › Analysis › Ready** loader; the 7 tabs (Summary, Specialist, Diet, Precautions, Medications, Trends, Wearables) appear when ready
+5. Switch the language in the chat header (or Profile) and re-export the PDF — the health guide renders in your chosen language
 
 ### Scenario 3 — Patient AI Chatbot
 1. Login as a **patient**
-2. Click **Chat with Medisense AI** from the patient dashboard
-3. Ask about symptoms, medications, or upload a lab report image
-4. Use the microphone button for voice input (Sarvam AI STT)
-5. Toggle TTS in the header for voice replies
-6. Start a new chat — the AI remembers your history from previous sessions
+2. Click **Chat with Medisense AI** from the sidebar
+3. Pick a specialty / specific doctor from "Available Specialists"
+4. Ask about symptoms, medications, or upload a lab report image (the chatbot already knows your active medications + interaction alerts)
+5. Use the microphone button for voice input (Sarvam AI STT)
+6. Toggle TTS in the header for voice replies
+7. Start a new chat — the AI remembers your history from previous sessions
 
 ### Scenario 4 — Schedule + Run a Google Meet Consultation
 1. Login as a **doctor** or **patient** → go to **Schedule**
 2. Fill in the form (other party's name + email, date/time, duration, reason) → submit
-3. The backend creates a Google Calendar event with a Meet link; both parties get the invite
-4. At meeting time, click **Join Google Meet** from the Upcoming card (or open the link from the calendar invite)
-5. After the call, login as the **doctor** → **Doctor Dashboard** → "Process Google Meet Consultation" section
-6. Click **Process** on the unprocessed session → the Meet transcript is run through diarization → NER → SOAP, the SOAP note is shown in the editor, and the patient gets a plain-language post-call explanation
+3. The success panel shows the Meet link **and** a tokenized pre-visit intake URL — copy and send to the patient
+4. The patient opens the intake URL, answers the questions, and submits — the doctor sees an AI clinical summary on their dashboard
+5. At meeting time, click **Join Google Meet** from the Upcoming card (or open the link from the calendar invite)
+6. After the call, login as the **doctor** → **Doctor Dashboard** → "Process Google Meet Consultation" section
+7. Click **Process** on the unprocessed session → the Meet transcript is run through diarization → NER → SOAP, the SOAP note appears in the editor (with the intake summary right above it), the audit + follow-up panels populate, and the patient gets a plain-language post-call explanation
 
 > Google Meet transcripts require a Google Workspace plan (Business Standard or higher). Free `@gmail.com` accounts can host the call but won't produce a transcript for processing.
+
+### Scenario 5 — Doctor Live Chat with a Patient
+1. Login as a **doctor** → **Doctor Chat** from the sidebar
+2. Pick an active patient session from the list
+3. Read the conversation so far; toggle **AI off** to take over and reply yourself, or leave it on so the AI keeps drafting answers
+4. Messages flow through `/api/patient/chat/ws/{session_id}` in real time
 
 ---
 
@@ -402,4 +465,4 @@ Always consult a qualified healthcare provider before making any health decision
 
 ---
 
-*MediSense AI — AI-Powered Health Intelligence Platform | Powered by OpenRouter + GPT-4o-mini*
+*MediSense AI — AI-Powered Health Intelligence Platform | Powered by OpenRouter + GPT-4o-mini + Sarvam AI + Google Calendar/Meet*
