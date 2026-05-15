@@ -55,6 +55,7 @@ class PatientChatMessageDTO(BaseModel):
     role: ChatRole
     content: str
     created_at: datetime
+    updated_at: Optional[datetime] = None
     file_references: List[ChatFileReference] = Field(default_factory=list)
     # Canonical attribution. Older rows without sender_type fall back to a
     # value derived from `role` so the UI can render them consistently.
@@ -64,6 +65,10 @@ class PatientChatMessageDTO(BaseModel):
     # Persisted emergency screening result for this message, if any.
     # Survives page reload because it's stored on `message_metadata` JSON.
     emergency_alert: Optional[EmergencyAlertPayload] = None
+
+
+class UpdateMessageRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=4000)
 
 
 class PatientChatSessionSummary(BaseModel):

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sendChatbotMessage } from '../api/chatbotApi';
+import { sendChatbotMessage, updateChatbotMessage, getChatbotSession } from '../api/chatbotApi';
 import type { ChatMessage } from '../types/chatbot.types';
 
 const SESSION_STORAGE_KEY = 'medisense_chatbot_session_id';
@@ -47,10 +47,12 @@ function isEmergency(text: string): boolean {
 }
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], {
+  // Explicitly use Indian Standard Time (IST)
+  return new Date(ts).toLocaleTimeString('en-IN', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+    timeZone: 'Asia/Kolkata',
   });
 }
 
@@ -177,6 +179,64 @@ function TypingDots() {
   );
 }
 
+function MessageActions({ text }: { text: string }) {
+  const [liked, setLiked] = useState<boolean | null>(null);
+  const [copied, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopying(true);
+      setTimeout(() => setCopying(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: 12, 
+      marginTop: 2, 
+      opacity: 0.8
+    }}>
+      <button 
+        type="button"
+        title="Like"
+        onClick={() => setLiked(liked === true ? null : true)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: liked === true ? 1 : 0.5, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        {liked === true ? '👍' : '👍'}
+      </button>
+      <button 
+        type="button"
+        title="Dislike"
+        onClick={() => setLiked(liked === false ? null : false)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: liked === false ? 1 : 0.5, transition: 'opacity 0.2s' }}
+      >
+        {liked === false ? '👎' : '👎'}
+      </button>
+      <button 
+        type="button"
+        title="Copy to clipboard"
+        onClick={handleCopy}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: copied ? 1 : 0.5, transition: 'opacity 0.2s' }}
+      >
+        {copied ? '✅' : '📋'}
+      </button>
+      <button 
+        type="button"
+        title="Share"
+        onClick={() => alert('Sharing functionality coming soon!')}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: 0.5, transition: 'opacity 0.2s' }}
+      >
+        🔗
+      </button>
+    </div>
+  );
+}
+
 /* ── Widget ─────────────────────────────────────────────────────────── */
 
 export default function ChatbotWidget() {
@@ -192,6 +252,11 @@ export default function ChatbotWidget() {
     if (typeof window === 'undefined') return null;
     return window.sessionStorage.getItem(SESSION_STORAGE_KEY);
   });
+
+  // ── Editing state ───────────────────────────────────────────────
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const [isEditingSaving, setIsEditingSaving] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -221,6 +286,30 @@ export default function ChatbotWidget() {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 96) + 'px';
   }, [input]);
+
+  // Load history if a session ID exists.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const history = await getChatbotSession(sessionId);
+        if (!cancelled && history.length > 0) {
+          setMessages(
+            history.map((m) => ({
+              ...m,
+              timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+            })),
+          );
+        }
+      } catch (err) {
+        console.error('Failed to load chatbot history', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   const toggleOpen = useCallback(() => {
     setOpen((prev) => !prev);
@@ -258,7 +347,7 @@ export default function ChatbotWidget() {
       try {
         // Strip timestamps — the API only takes {role, content}.
         const apiHistory: ChatMessage[] = nextHistory.map(({ role, content }) => ({ role, content }));
-        const { reply, session_id } = await sendChatbotMessage(
+        const { reply, session_id, user_message_id, assistant_message_id } = await sendChatbotMessage(
           apiHistory,
           sessionId,
           controller.signal,
@@ -271,10 +360,22 @@ export default function ChatbotWidget() {
             // sessionStorage may be unavailable (private mode); harmless to skip.
           }
         }
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: reply, timestamp: Date.now() },
-        ]);
+        setMessages((prev) => {
+          const updated = [...prev];
+          // Update the last user message with its DB ID.
+          const lastUser = updated.findLast((m) => m.role === 'user');
+          if (lastUser && user_message_id) {
+            lastUser.id = user_message_id;
+          }
+          // Append the AI reply.
+          updated.push({
+            id: assistant_message_id,
+            role: 'assistant',
+            content: reply,
+            timestamp: Date.now(),
+          });
+          return updated;
+        });
       } catch (err: unknown) {
         if (controller.signal.aborted) return;
         console.error('Chatbot send failed:', err);
@@ -285,6 +386,60 @@ export default function ChatbotWidget() {
     },
     [loading, messages, sessionId],
   );
+
+  const handleStartEdit = useCallback((msg: TimedMessage) => {
+    if (!msg.id) return; // Can't edit messages without an ID
+    setEditingId(msg.id);
+    setEditInput(msg.content);
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditInput('');
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingId || isEditingSaving || !sessionId) return;
+    const trimmed = editInput.trim();
+    if (!trimmed) return;
+    
+    const targetId = editingId;
+
+    setIsEditingSaving(true);
+    setLoading(true);
+    setEditingId(null);
+    setEditInput('');
+
+    // Optimistically update local messages and drop trailing ones
+    setMessages((prev) => {
+      const idx = prev.findIndex(m => m.id === targetId);
+      if (idx === -1) return prev;
+      const updatedMsg = { ...prev[idx], content: trimmed };
+      return [...prev.slice(0, idx), updatedMsg];
+    });
+
+    try {
+      await updateChatbotMessage(targetId, trimmed);
+      
+      // Re-fetch the session history so we get the regenerated AI reply
+      // and drop any messages that were "deleted" by the branching.
+      const history = await getChatbotSession(sessionId);
+      if (history.length > 0) {
+        setMessages(
+          history.map((m) => ({
+            ...m,
+            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+          })),
+        );
+      }
+    } catch (err) {
+      console.error('Failed to update message', err);
+      setError('Could not update message. Please try again.');
+    } finally {
+      setIsEditingSaving(false);
+      setLoading(false);
+    }
+  }, [editingId, editInput, isEditingSaving, sessionId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -461,35 +616,135 @@ export default function ChatbotWidget() {
                   <div key={gi} className="flex flex-col" style={{ gap: 4 }}>
                     {group.messages.map((m, mi) => {
                       const isFirstInGroup = mi === 0;
+                      const isEditing = editingId === m.id;
                       return (
                         <div
                           key={mi}
-                          className={`flex w-full items-end ${isUser ? 'justify-end' : 'justify-start'}`}
+                          className={`group flex w-full items-end ${isUser ? 'justify-end' : 'justify-start'}`}
                           style={{ gap: 8 }}
                         >
+                          {isUser && !isEditing && m.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(m as any)}
+                              style={{
+                                background: 'rgba(0,0,0,0.05)',
+                                border: '1px solid rgba(0,0,0,0.1)',
+                                borderRadius: '50%',
+                                width: 24,
+                                height: 24,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'rgba(0,0,0,0.5)',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                flexShrink: 0,
+                                transition: 'all 0.2s',
+                              }}
+                              onMouseEnter={(e) => { 
+                                e.currentTarget.style.color = PRIMARY; 
+                                e.currentTarget.style.background = 'rgba(29,158,117,0.1)'; 
+                              }}
+                              onMouseLeave={(e) => { 
+                                e.currentTarget.style.color = 'rgba(0,0,0,0.5)'; 
+                                e.currentTarget.style.background = 'rgba(0,0,0,0.05)'; 
+                              }}
+                              title="Edit message"
+                            >
+                              ✏️
+                            </button>
+                          )}
+
                           {!isUser && (
                             <div style={{ width: 28, flexShrink: 0 }}>
                               {isFirstInGroup && <BotAvatar size={28} />}
                             </div>
                           )}
-                          <div
-                            className="medibot-bubble whitespace-pre-wrap break-words"
-                            style={{
-                              maxWidth: '78%',
-                              padding: '10px 14px',
-                              fontSize: 13,
-                              lineHeight: 1.6,
-                              background: isUser ? PRIMARY : '#ffffff',
-                              color: isUser ? '#ffffff' : '#1a1a18',
-                              borderRadius: isUser
-                                ? '16px 16px 4px 16px'
-                                : '16px 16px 16px 4px',
-                              boxShadow: isUser
-                                ? '0 1px 3px rgba(29,158,117,0.25)'
-                                : '0 1px 4px rgba(0,0,0,0.08)',
-                            }}
-                          >
-                            {m.content}
+                          <div className="flex flex-col" style={{ maxWidth: '78%', gap: 4 }}>
+                            <div
+                              className="medibot-bubble relative whitespace-pre-wrap break-words"
+                              style={{
+                                width: '100%',
+                                padding: '10px 14px',
+                                fontSize: 13,
+                                lineHeight: 1.6,
+                                background: isUser ? PRIMARY : '#ffffff',
+                                color: isUser ? '#ffffff' : '#1a1a18',
+                                borderRadius: isUser
+                                  ? '16px 16px 4px 16px'
+                                  : '16px 16px 16px 4px',
+                                boxShadow: isUser
+                                  ? '0 1px 3px rgba(29,158,117,0.25)'
+                                  : '0 1px 4px rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              {isEditing ? (
+                                <div className="flex items-center" style={{ gap: 6, minWidth: 180, width: '100%' }}>
+                                  <input
+                                    autoFocus
+                                    value={editInput}
+                                    onChange={(e) => setEditInput(e.target.value)}
+                                    disabled={isEditingSaving}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        void handleSaveEdit();
+                                      } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        handleCancelEdit();
+                                      }
+                                    }}
+                                    className="medibot-textarea"
+                                    style={{
+                                      flex: 1,
+                                      background: 'rgba(255,255,255,0.15)',
+                                      border: '1px solid rgba(255,255,255,0.3)',
+                                      borderRadius: 6,
+                                      padding: '6px 8px',
+                                      color: '#fff',
+                                      fontSize: 13,
+                                      outline: 'none',
+                                      minWidth: 100,
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelEdit}
+                                    disabled={isEditingSaving}
+                                    style={{ fontSize: 13, color: '#fff', opacity: 0.8, padding: 2, background: 'none', border: 'none', cursor: 'pointer' }}
+                                    title="Cancel"
+                                  >
+                                    ✖
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleSaveEdit}
+                                    disabled={isEditingSaving || !editInput.trim()}
+                                    style={{
+                                      background: '#fff',
+                                      border: 'none',
+                                      borderRadius: '50%',
+                                      width: 24,
+                                      height: 24,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: PRIMARY,
+                                      fontSize: 12,
+                                      cursor: (isEditingSaving || !editInput.trim()) ? 'not-allowed' : 'pointer',
+                                      opacity: (isEditingSaving || !editInput.trim()) ? 0.6 : 1,
+                                    }}
+                                    title="Save"
+                                  >
+                                    ➤
+                                  </button>
+                                </div>
+                              ) : (
+                                m.content
+                              )}
+                            </div>
+                            {!isUser && !isEditing && <MessageActions text={m.content} />}
                           </div>
                         </div>
                       );

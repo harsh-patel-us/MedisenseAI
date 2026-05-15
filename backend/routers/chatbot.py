@@ -14,14 +14,14 @@ so the full transcript is auditable.
 import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import ChatbotSession, User, get_db
-from models.chatbot_models import ChatRequest, ChatResponse
+from database import ChatbotSession, ChatbotMessage, User, get_db
+from models.chatbot_models import ChatRequest, ChatResponse, UpdateChatbotMessageRequest, ChatMessage
 from services.auth_service import decode_token
 from services.chatbot_agent import run_chatbot
 from utils.helpers import generate_id
@@ -48,10 +48,6 @@ async def _maybe_user_id(authorization: Optional[str], db: AsyncSession) -> Opti
     return result.scalar_one_or_none()
 
 
-def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
-
-
 @router.post("/message", response_model=ChatResponse)
 async def send_message(
     request: ChatRequest,
@@ -66,7 +62,8 @@ async def send_message(
 
     # Run the agent pipeline.
     try:
-        reply = await run_chatbot([m.model_dump() for m in request.messages])
+        # We only pass the content to the agent, not the DB metadata.
+        reply = await run_chatbot([{"role": m.role, "content": m.content} for m in request.messages])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -88,24 +85,129 @@ async def send_message(
         session = ChatbotSession(
             id=request.session_id or generate_id(),
             user_id=await _maybe_user_id(authorization, db),
-            messages=json.dumps([]),
             message_count=0,
         )
         db.add(session)
+        await db.flush()
 
-    try:
-        history = json.loads(session.messages or "[]")
-        if not isinstance(history, list):
-            history = []
-    except json.JSONDecodeError:
-        history = []
+    user_msg_id = generate_id()
+    db.add(ChatbotMessage(
+        id=user_msg_id,
+        session_id=session.id,
+        role="user",
+        content=latest_user_msg,
+    ))
 
-    now = _now_iso()
-    history.append({"role": "user", "content": latest_user_msg, "created_at": now})
-    history.append({"role": "assistant", "content": reply, "created_at": now})
+    ai_msg_id = generate_id()
+    db.add(ChatbotMessage(
+        id=ai_msg_id,
+        session_id=session.id,
+        role="assistant",
+        content=reply,
+    ))
 
-    session.messages = json.dumps(history)
-    session.message_count = len(history)
+    session.message_count += 2
     await db.commit()
 
-    return ChatResponse(session_id=session.id, reply=reply)
+    return ChatResponse(
+        session_id=session.id,
+        reply=reply,
+        user_message_id=user_msg_id,
+        assistant_message_id=ai_msg_id,
+    )
+
+
+@router.get("/session/{session_id}", response_model=List[ChatMessage])
+async def get_session(
+    session_id: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+) -> List[ChatMessage]:
+    """Retrieve the full transcript of a public-website chatbot session."""
+    result = await db.execute(
+        select(ChatbotMessage)
+        .where(ChatbotMessage.session_id == session_id)
+        .where(ChatbotMessage.is_deleted == False)
+        .order_by(ChatbotMessage.created_at.asc())
+    )
+    messages = result.scalars().all()
+
+    return [
+        ChatMessage(
+            id=m.id,
+            role=m.role,  # type: ignore[arg-type]
+            content=m.content,
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+        )
+        for m in messages
+    ]
+
+
+@router.put("/message/{message_id}", response_model=ChatMessage)
+async def update_message(
+    payload: UpdateChatbotMessageRequest,
+    message_id: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+) -> ChatMessage:
+    """Update the content of a public-website chatbot message.
+    Anyone with the message ID can edit (stateless sessions)."""
+    result = await db.execute(
+        select(ChatbotMessage).where(ChatbotMessage.id == message_id)
+    )
+    msg = result.scalar_one_or_none()
+
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found.")
+
+    if msg.role != "user":
+        raise HTTPException(
+            status_code=400,
+            detail="Only user messages can be edited.",
+        )
+
+    msg.content = payload.content.strip()
+    msg.updated_at = datetime.utcnow()
+
+    # Mark subsequent messages as deleted.
+    await db.execute(
+        ChatbotMessage.__table__.update()
+        .where(ChatbotMessage.session_id == msg.session_id)
+        .where(ChatbotMessage.created_at > msg.created_at)
+        .values(is_deleted=True)
+    )
+
+    await db.commit()
+
+    # AI Regeneration for generic chatbot.
+    result = await db.execute(
+        select(ChatbotMessage)
+        .where(ChatbotMessage.session_id == msg.session_id)
+        .where(ChatbotMessage.is_deleted == False)
+        .order_by(ChatbotMessage.created_at.asc())
+    )
+    history_rows = result.scalars().all()
+    history_dicts = [{"role": m.role, "content": m.content} for m in history_rows]
+
+    try:
+        reply = await run_chatbot(history_dicts)
+        ai_msg_id = generate_id()
+        db.add(ChatbotMessage(
+            id=ai_msg_id,
+            session_id=msg.session_id,
+            role="assistant",
+            content=reply,
+        ))
+        await db.commit()
+    except Exception as exc:
+        logger.error(f"Chatbot regeneration failed: {exc}")
+        # We still return the user message update even if regeneration fails.
+
+    await db.refresh(msg)
+
+    return ChatMessage(
+        id=msg.id,
+        role=msg.role,  # type: ignore[arg-type]
+        content=msg.content,
+        created_at=msg.created_at,
+        updated_at=msg.updated_at,
+    )

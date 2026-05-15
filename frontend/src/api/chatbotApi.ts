@@ -15,3 +15,21 @@ export async function sendChatbotMessage(
   );
   return data;
 }
+
+export async function getChatbotSession(sessionId: string): Promise<ChatMessage[]> {
+  const { data } = await axios.get<ChatMessage[]>(
+    `${API_BASE}/chatbot/session/${encodeURIComponent(sessionId)}`,
+  );
+  return data;
+}
+
+export async function updateChatbotMessage(
+  messageId: string,
+  content: string,
+): Promise<ChatMessage> {
+  const { data } = await axios.put<ChatMessage>(
+    `${API_BASE}/chatbot/message/${encodeURIComponent(messageId)}`,
+    { content },
+  );
+  return data;
+}

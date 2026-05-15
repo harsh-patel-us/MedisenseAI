@@ -37,6 +37,7 @@ export interface PatientChatMessage {
   role: PatientChatRole;
   content: string;
   created_at: string;
+  updated_at?: string | null;
   file_references?: ChatFileReference[];
   sender_type?: PatientSenderType | null;
   sender_id?: string | null;

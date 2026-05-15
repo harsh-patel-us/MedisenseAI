@@ -36,6 +36,17 @@ export async function sendPatientChatMessage(
   return data;
 }
 
+export async function updatePatientChatMessage(
+  messageId: string,
+  content: string,
+): Promise<PatientChatMessage> {
+  const { data } = await axios.put<PatientChatMessage>(
+    `${API_BASE}/patient/chat/message/${encodeURIComponent(messageId)}`,
+    { content },
+  );
+  return data;
+}
+
 export async function listDoctors(): Promise<DoctorListResponse> {
   const { data } = await axios.get<DoctorListResponse>(
     `${API_BASE}/patient/chat/doctors`,

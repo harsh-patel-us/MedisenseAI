@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped
-from sqlalchemy import Float, Index, Text, String, DateTime, ForeignKey, Integer, LargeBinary, func
+from sqlalchemy import Float, Index, Text, String, DateTime, ForeignKey, Integer, LargeBinary, Boolean, func
 from typing import Optional
 
 from config import settings
@@ -188,10 +188,8 @@ class ConsultationSession(Base):
 
 class ChatbotSession(Base):
     """Persistent transcript for the website chatbot widget.
-
     Each visitor browser keeps a session_id in sessionStorage and replays it
-    on every turn. The full conversation is stored as JSON on `messages` so
-    we don't need a per-message child table for what is essentially append-only.
+    on every turn.
     """
     __tablename__ = "chatbot_sessions"
 
@@ -204,7 +202,23 @@ class ChatbotSession(Base):
         String, ForeignKey("users.id"), nullable=True, index=True
     )
     message_count: Mapped[int] = mapped_column(Integer, default=0)
-    messages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list
+
+
+class ChatbotMessage(Base):
+    """Individual message within a website chatbot session."""
+    __tablename__ = "chatbot_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chatbot_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, onupdate=func.now()
+    )
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class PatientAnalysisRecord(Base):
@@ -301,7 +315,9 @@ class PatientChatMessage(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)  # "user" | "assistant" | "doctor"
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, onupdate=func.now())
     message_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # JSON list of {filename, mime_type, size_bytes, kind: "image"|"pdf"} entries
     # describing files the patient attached on this turn. Raw bytes are not stored.
     file_references: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -629,11 +645,17 @@ async def init_db():
             "chatbot_sessions": [
                 ("user_id", "VARCHAR"),
                 ("message_count", "INTEGER DEFAULT 0"),
+                ("updated_at", "TIMESTAMP"),
+            ],
+            "chatbot_messages": [
+                ("is_deleted", "BOOLEAN DEFAULT 0"),
             ],
             "patient_chat_messages": [
                 ("file_references", "TEXT"),
                 ("sender_type", "VARCHAR"),
                 ("sender_id", "VARCHAR"),
+                ("updated_at", "TIMESTAMP"),
+                ("is_deleted", "BOOLEAN DEFAULT 0"),
             ],
             "patient_chat_sessions": [
                 ("title", "VARCHAR"),

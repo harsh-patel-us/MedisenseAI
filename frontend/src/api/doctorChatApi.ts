@@ -58,6 +58,10 @@ export async function sendDoctorChatMessage(sessionId: string, message: string):
   await axios.post(`${API_BASE}/doctor/chat/${encodeURIComponent(sessionId)}/message`, { message });
 }
 
+export async function updateDoctorChatMessage(messageId: string, content: string): Promise<void> {
+  await axios.put(`${API_BASE}/patient/chat/message/${encodeURIComponent(messageId)}`, { content });
+}
+
 /** Open a WebSocket against a chat session so the doctor's UI can receive
  *  patient messages and mode-change events live. The bearer token is passed
  *  as a query param (browsers can't set headers on WS upgrades). */

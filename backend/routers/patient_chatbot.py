@@ -67,6 +67,7 @@ from models.patient_chatbot_models import (
     PatientVoiceMessageResponse,
     SpecialtiesResponse,
     SpecialtyOption,
+    UpdateMessageRequest,
 )
 from services import claude_service
 from services.auth_service import decode_token, get_current_user
@@ -775,6 +776,174 @@ async def send_message(
     )
 
 
+# ── PUT /patient/chat/message/{message_id} ───────────────────────────────
+
+@router.put("/message/{message_id}", response_model=PatientChatMessageDTO)
+async def update_message(
+    payload: UpdateMessageRequest,
+    message_id: str = Path(...),
+    request: Request = None,  # type: ignore[assignment]
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PatientChatMessageDTO:
+    """Update the content of a previously sent message. Only user messages
+    can be edited. After updating, a background task may be triggered to
+    re-summarize the session if needed."""
+    msg = (
+        await db.execute(
+            select(PatientChatMessage).where(PatientChatMessage.id == message_id)
+        )
+    ).scalar_one_or_none()
+
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found.")
+
+    # Only the original sender can edit.
+    # Note: `sender_id` might be NULL for older rows or AI messages.
+    # For newer rows, doctors have their user.id in `sender_id`.
+    # Patients also have their user.id in `sender_id` (added recently).
+    # If `sender_id` is missing, we fall back to checking if the patient owns the session.
+    is_owner = False
+    if msg.sender_id:
+        is_owner = (msg.sender_id == user.id)
+    elif msg.role == "user" and user.role == "patient":
+        is_owner = (msg.patient_id == user.id)
+
+    if not is_owner:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only edit your own messages.",
+        )
+
+    if msg.role not in ("user", "doctor"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only user or doctor messages can be edited.",
+        )
+
+    old_content = msg.content
+    msg.content = payload.content.strip()
+    msg.updated_at = datetime.utcnow()
+
+    # Mark all subsequent messages in this session as deleted (soft delete).
+    # This hides the "old branch" of the conversation in the UI.
+    await db.execute(
+        PatientChatMessage.__table__.update()
+        .where(PatientChatMessage.session_id == msg.session_id)
+        .where(PatientChatMessage.created_at > msg.created_at)
+        .values(is_deleted=True)
+    )
+
+    await _audit(
+        db,
+        user.id,
+        action="message_edit",
+        request=request,
+        detail=json.dumps({"message_id": msg.id, "old_len": len(old_content), "new_len": len(msg.content)}),
+    )
+    await db.commit()
+
+    # Broadcast that the conversation history has changed.
+    # Frontend should remove all messages after this one.
+    await chat_manager.broadcast(
+        msg.session_id,
+        {
+            "type": "chat_invalidate",
+            "after_message_id": msg.id,
+            "updated_message": {
+                "id": msg.id,
+                "content": msg.content,
+                "updated_at": msg.updated_at.isoformat(),
+            },
+        },
+    )
+
+    # ── AI Regeneration ───────────────────────────────────────────────
+    # If the session is currently in AI mode, we automatically trigger a
+    # new AI reply to the edited message.
+    session = await db.get(PatientChatSession, msg.session_id)
+    if session and session.session_mode == "ai" and not session.doctor_joined:
+        # Load the non-deleted history up to and including the edited message.
+        history_rows = (
+            await db.execute(
+                select(PatientChatMessage)
+                .where(PatientChatMessage.session_id == session.id)
+                .where(PatientChatMessage.is_deleted == False)
+                .order_by(asc(PatientChatMessage.created_at))
+            )
+        ).scalars().all()
+        
+        history_dicts = [{"role": m.role, "content": m.content} for m in history_rows[:-1]]
+        latest_user_msg = history_rows[-1].content
+
+        # Re-resolve doctor name for context.
+        assigned_doctor_name: Optional[str] = None
+        if session.assigned_doctor_id:
+            doc = (await db.execute(select(User.full_name).where(User.id == session.assigned_doctor_id))).first()
+            assigned_doctor_name = doc[0] if doc else None
+
+        # Call AI
+        reply = await generate_chat_reply(
+            db=db,
+            patient_id=user.id,
+            history=history_dicts,
+            user_message=latest_user_msg,
+            attachments=[],  # For now, regeneration doesn't re-process original attachments on THAT turn.
+            session_attachments=[], # Best effort — we omit prior memos for regeneration speed.
+            specialty_id=session.specialty,
+            doctor_name=assigned_doctor_name,
+            language=getattr(user, "preferred_language", "en") or "en",
+        )
+
+        if reply:
+            ai_msg_id = generate_id()
+            now = datetime.utcnow()
+            db.add(PatientChatMessage(
+                id=ai_msg_id,
+                session_id=session.id,
+                patient_id=user.id,
+                role="assistant",
+                content=reply,
+                created_at=now,
+                sender_type="ai",
+                sender_id=None,
+            ))
+            await db.commit()
+
+            # Broadcast the new reply.
+            await chat_manager.broadcast(
+                session.id,
+                {
+                    "type": "message",
+                    "message": {
+                        "id": ai_msg_id,
+                        "role": "assistant",
+                        "sender_type": "ai",
+                        "sender_id": None,
+                        "sender_name": assigned_doctor_name or "MediSense AI",
+                        "content": reply,
+                        "created_at": now.isoformat(),
+                        "file_references": [],
+                    },
+                },
+            )
+
+    name_by_msg = await _resolve_sender_names(db, [msg], user.full_name)
+
+    return PatientChatMessageDTO(
+        id=msg.id,
+        role=msg.role,  # type: ignore[arg-type]
+        content=msg.content,
+        created_at=msg.created_at,
+        updated_at=msg.updated_at,
+        file_references=_parse_file_refs(msg.file_references),
+        sender_type=msg.sender_type or _derive_sender_type(msg.role),  # type: ignore[arg-type]
+        sender_id=msg.sender_id,
+        sender_name=name_by_msg.get(msg.id),
+        emergency_alert=_parse_emergency_alert(msg.message_metadata),
+    )
+
+
 # ── GET /patient/chat/history/{patient_id} ───────────────────────────────
 
 @router.get("/history/{patient_id}", response_model=PatientChatHistoryResponse)
@@ -849,13 +1018,13 @@ async def get_session(
 
     verify_patient_ownership(session.patient_id, user)
 
-    msgs = (
-        await db.execute(
-            select(PatientChatMessage)
-            .where(PatientChatMessage.session_id == session.id)
-            .order_by(asc(PatientChatMessage.created_at))
-        )
-    ).scalars().all()
+    result = await db.execute(
+        select(PatientChatMessage)
+        .where(PatientChatMessage.session_id == session_id)
+        .where(PatientChatMessage.is_deleted == False)
+        .order_by(PatientChatMessage.created_at.asc())
+    )
+    msgs = result.scalars().all()
 
     await _audit(
         db,

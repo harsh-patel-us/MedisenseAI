@@ -3,12 +3,71 @@ import {
   getPatientChatForDoctor,
   sendDoctorChatMessage,
   toggleChatAi,
-  openDoctorChatWebSocket
+  openDoctorChatWebSocket,
+  updateDoctorChatMessage,
 } from '../../api/doctorChatApi';
 import type { PatientChatMessage } from '../../types/patientChatbot.types';
 
 const TEAL = '#05aebb';
 const TEAL_DARK = '#0f6e56';
+
+function MessageActions({ text }: { text: string }) {
+  const [liked, setLiked] = useState<boolean | null>(null);
+  const [copied, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopying(true);
+      setTimeout(() => setCopying(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: 12, 
+      marginTop: 6,
+      opacity: 0.8
+    }}>
+      <button 
+        type="button"
+        title="Like"
+        onClick={() => setLiked(liked === true ? null : true)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: liked === true ? 1 : 0.45, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        {liked === true ? '👍' : '👍'}
+      </button>
+      <button 
+        type="button"
+        title="Dislike"
+        onClick={() => setLiked(liked === false ? null : false)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: liked === false ? 1 : 0.45, transition: 'opacity 0.2s' }}
+      >
+        {liked === false ? '👎' : '👎'}
+      </button>
+      <button 
+        type="button"
+        title="Copy to clipboard"
+        onClick={handleCopy}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: copied ? 1 : 0.45, transition: 'opacity 0.2s' }}
+      >
+        {copied ? '✅' : '📋'}
+      </button>
+      <button 
+        type="button"
+        title="Share"
+        onClick={() => alert('Sharing functionality coming soon!')}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.45, transition: 'opacity 0.2s' }}
+      >
+        🔗
+      </button>
+    </div>
+  );
+}
 
 function BotAvatar({ size = 32 }: { size?: number }) {
   const iconSize = Math.round(size * 0.62);
@@ -60,6 +119,11 @@ export default function DoctorChatView({ sessionId }: DoctorChatViewProps) {
   const [toggling, setToggling] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // ── Editing state ──────────────────────────────────────
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
   const loadChat = useCallback(async () => {
     try {
       const res = await getPatientChatForDoctor(sessionId);
@@ -100,6 +164,14 @@ export default function DoctorChatView({ sessionId }: DoctorChatViewProps) {
             const incoming = payload.message;
             setMessages((prev: PatientChatMessage[]) =>
               prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming],
+            );
+          } else if (payload.type === 'message_update') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === payload.message_id
+                  ? { ...m, content: payload.content, updated_at: payload.updated_at }
+                  : m
+              )
             );
           }
         } catch (err) {
@@ -177,6 +249,44 @@ export default function DoctorChatView({ sessionId }: DoctorChatViewProps) {
     }
   };
 
+  const handleStartEdit = (m: PatientChatMessage) => {
+    setEditingId(m.id);
+    setEditValue(m.content);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId || isSaving) return;
+    const trimmed = editValue.trim();
+    if (!trimmed) return;
+    
+    const targetId = editingId;
+    
+    // Optimistic UI updates
+    setEditingId(null);
+    setEditValue('');
+    setIsSaving(true);
+
+    setMessages((prev) => {
+      const idx = prev.findIndex(m => m.id === targetId);
+      if (idx === -1) return prev;
+      const updatedMsg = { ...prev[idx], content: trimmed };
+      return [...prev.slice(0, idx), updatedMsg, ...prev.slice(idx + 1)];
+    });
+
+    try {
+      await updateDoctorChatMessage(targetId, trimmed);
+    } catch (err) {
+      alert('Failed to update message');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
@@ -249,15 +359,17 @@ export default function DoctorChatView({ sessionId }: DoctorChatViewProps) {
               const isYou = m.role === 'doctor';
               const isAi = m.role === 'assistant';
               const isPatient = m.role === 'user';
+              const isEditing = editingId === m.id;
 
               return (
-                <div key={m.id} style={{
+                <div key={m.id} className="group" style={{
                   display: 'flex',
                   gap: 12,
                   flexDirection: isYou ? 'row-reverse' : 'row',
                   alignItems: 'flex-end',
                   maxWidth: '85%',
                   alignSelf: isYou ? 'flex-end' : 'flex-start',
+                  position: 'relative'
                 }}>
                   {!isYou && (
                     <div style={{ flexShrink: 0, marginBottom: 18 }}>
@@ -284,25 +396,141 @@ export default function DoctorChatView({ sessionId }: DoctorChatViewProps) {
                     }}>
                       {isYou ? 'You' : isPatient ? 'Patient' : 'MediSense AI'}
                     </div>
-                    <div style={{
-                      padding: '12px 16px',
-                      borderRadius: isYou ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                      background: isYou ? TEAL : '#ffffff',
-                      color: isYou ? '#fff' : '#1a1a18',
-                      fontSize: '0.92rem',
-                      lineHeight: 1.55,
-                      border: isAi ? `1px solid ${TEAL}` : 'none',
-                      boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word'
-                    }}>
-                      {m.content}
-                    </div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', padding: '0 4px' }}>
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </div>
-                </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {isYou && !isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(m)}
+                          style={{
+                            background: 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: '50%',
+                            width: 28,
+                            height: 28,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'rgba(255,255,255,0.8)',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            flexShrink: 0,
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => { 
+                            e.currentTarget.style.color = '#fff'; 
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; 
+                          }}
+                          onMouseLeave={(e) => { 
+                            e.currentTarget.style.color = 'rgba(255,255,255,0.8)'; 
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; 
+                          }}
+                          title="Edit message"
+                        >
+                          ✏️
+                        </button>
+                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ position: 'relative' }}>
+                          <div style={{
+                            padding: '12px 16px',
+                            borderRadius: isYou ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                            background: isYou ? TEAL : '#ffffff',
+                            color: isYou ? '#fff' : '#1a1a18',
+                            fontSize: '0.92rem',
+                            lineHeight: 1.55,
+                            border: isAi ? `1px solid ${TEAL}` : 'none',
+                            boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            minWidth: isEditing ? 240 : 'auto',
+                          }}>
+                            <div style={{ flex: 1 }}>
+                              {isEditing ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240, width: '100%' }}>
+                                  <input
+                                    autoFocus
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    disabled={isSaving}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveEdit();
+                                      } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        handleCancelEdit();
+                                      }
+                                    }}
+                                    style={{
+                                      flex: 1,
+                                      background: 'rgba(0,0,0,0.1)',
+                                      border: '1px solid rgba(255,255,255,0.2)',
+                                      borderRadius: 8,
+                                      padding: '8px 12px',
+                                      color: '#fff',
+                                      fontSize: '0.92rem',
+                                      fontFamily: 'inherit',
+                                      outline: 'none',
+                                      minWidth: 150
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelEdit}
+                                    disabled={isSaving}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: 'rgba(255,255,255,0.8)',
+                                      fontSize: '1rem',
+                                      cursor: 'pointer',
+                                      padding: '4px'
+                                    }}
+                                    title="Cancel"
+                                  >
+                                    ✖
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleSaveEdit}
+                                    disabled={isSaving || !editValue.trim()}
+                                    style={{
+                                      background: '#fff',
+                                      border: 'none',
+                                      borderRadius: '50%',
+                                      width: 28,
+                                      height: 28,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: TEAL,
+                                      fontSize: '0.9rem',
+                                      cursor: (isSaving || !editValue.trim()) ? 'not-allowed' : 'pointer',
+                                      opacity: (isSaving || !editValue.trim()) ? 0.6 : 1
+                                    }}
+                                    title="Save"
+                                  >
+                                    ➤
+                                  </button>
+                                </div>
+                              ) : (
+                                <div>{m.content}</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {isAi && <div style={{ marginLeft: 6 }}><MessageActions text={m.content} /></div>}
+                      </div>
+                                </div>
+
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', padding: '0 4px', display: 'flex', gap: 6 }}>
+                                {m.updated_at && <span style={{ fontStyle: 'italic' }}>(edited)</span>}
+                                <span>{new Date(m.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}</span>
+                                </div>
+                                </div>
+                                </div>
+
               );
             })
           )}

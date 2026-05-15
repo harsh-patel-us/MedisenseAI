@@ -14,6 +14,7 @@ import {
   sendPatientChatMessage,
   transcribeVoiceMessage,
   synthesizeTTS,
+  updatePatientChatMessage,
 } from '../api/patientChatbotApi';
 import type {
   ChatAttachmentUpload,
@@ -71,7 +72,13 @@ function formatFileSize(bytes: number): string {
 
 function formatTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    // Explicitly use Indian Standard Time (IST)
+    return new Date(iso).toLocaleTimeString('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
+    });
   } catch {
     return '';
   }
@@ -91,6 +98,64 @@ function specialistEmoji(specialty: string): string {
 }
 
 /* ── Components ─────────────────────────────────────────────────────── */
+
+function MessageActions({ text, light }: { text: string; light?: boolean }) {
+  const [liked, setLiked] = useState<boolean | null>(null);
+  const [copied, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopying(true);
+      setTimeout(() => setCopying(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: 12, 
+      marginTop: 6,
+      opacity: 0.8
+    }}>
+      <button 
+        type="button"
+        title="Like"
+        onClick={() => setLiked(liked === true ? null : true)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: liked === true ? 1 : 0.5, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        {liked === true ? '👍' : '👍'}
+      </button>
+      <button 
+        type="button"
+        title="Dislike"
+        onClick={() => setLiked(liked === false ? null : false)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: liked === false ? 1 : 0.5, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        {liked === false ? '👎' : '👎'}
+      </button>
+      <button 
+        type="button"
+        title="Copy to clipboard"
+        onClick={handleCopy}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: copied ? 1 : 0.5, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        {copied ? '✅' : '📋'}
+      </button>
+      <button 
+        type="button"
+        title="Share"
+        onClick={() => alert('Sharing functionality coming soon!')}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.5, transition: 'opacity 0.2s', padding: 0 }}
+      >
+        🔗
+      </button>
+    </div>
+  );
+}
 
 function BotAvatar({ size = 36 }: { size?: number }) {
   const iconSize = Math.round(size * 0.62);
@@ -178,6 +243,12 @@ export default function PatientChat() {
   // session_mode: "ai" while the AI is answering, "doctor" once the assigned
   // human takes over. Drives the patient-side status banner.
   const [sessionMode, setSessionMode] = useState<'ai' | 'doctor'>('ai');
+
+  // ── Message Editing state ──────────────────────────────────────
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const [isEditingSaving, setIsEditingSaving] = useState(false);
+  const [aiThinking, setAiThinking] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -718,6 +789,7 @@ export default function PatientChat() {
             setDoctorJoined(Boolean(payload.doctor_joined));
           } else if (payload.type === 'message' && payload.message) {
             const incoming = payload.message as PatientChatMessage;
+            setAiThinking(false);
             setMessages((prev) => {
               // 1. If we already have this exact message ID, skip.
               if (prev.some((m) => m.id === incoming.id)) return prev;
@@ -742,7 +814,27 @@ export default function PatientChat() {
             if (ttsEnabled && incoming.role !== 'user' && incoming.content) {
               playTTS(incoming.content);
             }
+          } else if (payload.type === 'message_update') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === payload.message_id
+                  ? {
+                    ...m,
+                    content: payload.content,
+                    updated_at: payload.updated_at,
+                  }
+                  : m
+              )
+            );
+          } else if (payload.type === 'chat_invalidate') {
+            setMessages((prev) => {
+              const idx = prev.findIndex(m => m.id === payload.after_message_id);
+              if (idx === -1) return prev;
+              const updatedMsg = { ...prev[idx], ...payload.updated_message };
+              return [...prev.slice(0, idx), updatedMsg];
+            });
           }
+
         } catch (err) {
           console.error('WS payload parse failed', err);
         }
@@ -771,6 +863,52 @@ export default function PatientChat() {
       }
     };
   }, [activeSessionId, patientId, ttsEnabled, playTTS]);
+
+  const handleStartEdit = useCallback((msg: UiMessage) => {
+    setEditingMessageId(msg.id);
+    setEditInput(msg.content);
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditInput('');
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingMessageId || isEditingSaving) return;
+    const trimmed = editInput.trim();
+    if (!trimmed) return;
+
+    const targetId = editingMessageId;
+    
+    // 1. Optimistic UI Updates: close box & show loader instantly
+    setEditingMessageId(null);
+    setEditInput('');
+    setIsEditingSaving(true);
+    
+    if (sessionMode === 'ai' && !doctorJoined) {
+      setAiThinking(true);
+    }
+
+    setMessages((prev) => {
+      // Optimistically update the text and drop subsequent messages
+      const idx = prev.findIndex(m => m.id === targetId);
+      if (idx === -1) return prev;
+      const updatedMsg = { ...prev[idx], content: trimmed };
+      return [...prev.slice(0, idx), updatedMsg];
+    });
+
+    try {
+      // 2. Perform network request
+      await updatePatientChatMessage(targetId, trimmed);
+    } catch (err) {
+      console.error('Failed to update message', err);
+      setError('Could not update your message. Please try again.');
+      setAiThinking(false);
+    } finally {
+      setIsEditingSaving(false);
+    }
+  }, [editingMessageId, editInput, isEditingSaving, sessionMode, doctorJoined]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1156,9 +1294,24 @@ export default function PatientChat() {
                   alert={m.emergency_alert as EmergencyAlertData}
                 />
               )}
-              <MessageBubble msg={m} />
+              <MessageBubble
+                msg={m}
+                isEditing={editingMessageId === m.id}
+                editValue={editInput}
+                onEditChange={setEditInput}
+                onStartEdit={() => handleStartEdit(m)}
+                onCancelEdit={handleCancelEdit}
+                onSaveEdit={handleSaveEdit}
+                isSaving={isEditingSaving}
+              />
             </div>
           ))}
+
+          {aiThinking && (
+            <div style={{ padding: '8px 14px' }}>
+              <ThinkingIndicator />
+            </div>
+          )}
         </div>
 
         {/* Error banner */}
@@ -1397,7 +1550,25 @@ export default function PatientChat() {
 
 /* ── Sub-components ─────────────────────────────────────────────── */
 
-function MessageBubble({ msg }: { msg: UiMessage }) {
+function MessageBubble({
+  msg,
+  isEditing,
+  editValue,
+  onEditChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  isSaving,
+}: {
+  msg: UiMessage;
+  isEditing?: boolean;
+  editValue?: string;
+  onEditChange?: (v: string) => void;
+  onStartEdit?: () => void;
+  onCancelEdit?: () => void;
+  onSaveEdit?: () => void;
+  isSaving?: boolean;
+}) {
   const isUser = msg.role === 'user';
   const isDoctor = msg.role === 'doctor';
   const refs = msg.file_references ?? [];
@@ -1408,8 +1579,45 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
         display: 'flex',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         gap: 10,
+        alignItems: 'center',
+        group: 'message-bubble', // for css targeting if needed
       }}
+      className="group"
     >
+      {/* Edit Trigger Icon — always visible for editable messages, placed outside the bubble */}
+      {isUser && !isEditing && !msg.pending && (
+        <button
+          type="button"
+          onClick={onStartEdit}
+          title="Edit message"
+          style={{
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '50%',
+            width: 28,
+            height: 28,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'rgba(255,255,255,0.8)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            flexShrink: 0,
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => { 
+            e.currentTarget.style.color = '#fff'; 
+            e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; 
+          }}
+          onMouseLeave={(e) => { 
+            e.currentTarget.style.color = 'rgba(255,255,255,0.8)'; 
+            e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; 
+          }}
+        >
+          ✏️
+        </button>
+      )}
+
       {isDoctor ? (
         <div style={{
           fontSize: 20,
@@ -1423,60 +1631,147 @@ function MessageBubble({ msg }: { msg: UiMessage }) {
           flexShrink: 0,
         }}>👨‍⚕️</div>
       ) : (!isUser && <BotAvatar size={34} />)}
-      <div
-        style={{
-          maxWidth: '70%',
-          background: isUser ? TEAL : isDoctor ? 'rgba(15, 30, 60, 0.95)' : 'rgba(15,30,60,0.85)',
-          border: isDoctor ? `1.5px solid ${TEAL}` : 'none',
-          color: isUser ? '#fff' : 'var(--text-primary)',
-          padding: '10px 14px',
-          borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-          boxShadow: isDoctor ? `0 0 12px ${TEAL}33` : '0 1px 4px rgba(0,0,0,0.18)',
-          fontSize: '0.92rem',
-          lineHeight: 1.55,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          position: 'relative',
-        }}
-      >
-        {isDoctor && (
-          <div style={{
-            fontSize: '0.65rem',
-            fontWeight: 800,
-            color: TEAL,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            marginBottom: 4,
-          }}>Attending Specialist</div>
-        )}
-        {refs.length > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              marginBottom: msg.content && msg.content !== '[attachment uploaded]' ? 8 : 0,
-            }}
-          >
-            {refs.map((r, i) => (
-              <FileChip key={i} ref_={r} onLightBg={!isUser} />
-            ))}
+      <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '75%' }}>
+        <div
+          style={{
+            background: isUser ? TEAL : isDoctor ? 'rgba(15, 30, 60, 0.95)' : 'rgba(15,30,60,0.85)',
+            border: isDoctor ? `1.5px solid ${TEAL}` : 'none',
+            color: isUser ? '#fff' : 'var(--text-primary)',
+            padding: '10px 14px',
+            borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+            boxShadow: isDoctor ? `0 0 12px ${TEAL}33` : '0 1px 4px rgba(0,0,0,0.18)',
+            fontSize: '0.92rem',
+            lineHeight: 1.55,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            position: 'relative',
+          }}
+        >
+          {isDoctor && (
+            <div style={{
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              color: TEAL,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: 4,
+            }}>Attending Specialist</div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <div style={{ flex: 1 }}>
+              {refs.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    marginBottom: msg.content && msg.content !== '[attachment uploaded]' ? 8 : 0,
+                  }}
+                >
+                  {refs.map((r, i) => (
+                    <FileChip key={i} ref_={r} onLightBg={!isUser} />
+                  ))}
+                </div>
+              )}
+
+              {msg.pending ? (
+                <ThinkingIndicator />
+              ) : isEditing ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240, width: '100%' }}>
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => onEditChange?.(e.target.value)}
+                    disabled={isSaving}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        onSaveEdit?.();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        onCancelEdit?.();
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      background: 'rgba(0,0,0,0.2)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 8,
+                      padding: '8px 12px',
+                      color: '#fff',
+                      fontSize: '0.92rem',
+                      fontFamily: 'inherit',
+                      outline: 'none',
+                      minWidth: 150,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    disabled={isSaving}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'rgba(255,255,255,0.8)',
+                      fontSize: '1rem',
+                      cursor: 'pointer',
+                      padding: '4px',
+                    }}
+                    title="Cancel"
+                  >
+                    ✖
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSaveEdit}
+                    disabled={isSaving || !editValue?.trim()}
+                    style={{
+                      background: '#fff',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: 28,
+                      height: 28,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: TEAL,
+                      fontSize: '0.9rem',
+                      cursor: (isSaving || !editValue?.trim()) ? 'not-allowed' : 'pointer',
+                      opacity: (isSaving || !editValue?.trim()) ? 0.6 : 1,
+                    }}
+                    title="Save"
+                  >
+                    ➤
+                  </button>
+                </div>
+              ) : msg.content === '[attachment uploaded]' && refs.length > 0 ? null : (
+                <span>{msg.content}</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {!isUser && !isDoctor && !msg.pending && msg.content && (
+          <div style={{ marginLeft: 6 }}>
+            <MessageActions text={msg.content} />
           </div>
         )}
-        {msg.pending ? (
-          <ThinkingIndicator />
-        ) : msg.content === '[attachment uploaded]' && refs.length > 0 ? null : (
-          <span>{msg.content}</span>
-        )}
+
         <div
           style={{
             fontSize: '0.68rem',
             opacity: 0.6,
             marginTop: 6,
             textAlign: isUser ? 'right' : 'left',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: isUser ? 'flex-end' : 'flex-start',
+            gap: 6,
           }}
         >
-          {formatTime(msg.created_at)}
+          {msg.updated_at && <span style={{ fontStyle: 'italic' }}>(edited)</span>}
+          <span>{formatTime(msg.created_at)}</span>
         </div>
       </div>
     </div>
