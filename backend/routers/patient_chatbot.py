@@ -18,7 +18,7 @@ import base64
 import binascii
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
@@ -99,6 +99,20 @@ router = APIRouter(prefix="/patient/chat", tags=["patient-chat"])
 
 ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/jpg", "image/png"}
 ALLOWED_PDF_MIMES = {"application/pdf"}
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Return a UTC-aware datetime without changing the instant."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _utc_iso(dt: Optional[datetime]) -> str:
+    aware = _as_utc(dt)
+    return aware.isoformat() if aware else ""
 
 
 # ── Auth + audit helpers ─────────────────────────────────────────────────
@@ -462,7 +476,7 @@ async def send_message(
             filename=row.filename,
             mime_type=row.mime_type,
             kind=row.kind,
-            created_at=row.created_at.isoformat() if row.created_at else "",
+            created_at=_utc_iso(row.created_at),
             extracted_text=row.extracted_text or "",
         )
         for row in reversed(prior_atts)
@@ -618,6 +632,7 @@ async def send_message(
     # Persist this turn.
     user_text = (payload.message or "").strip()
     now = datetime.utcnow()
+    now_utc = _as_utc(now)
 
     user_message_id: Optional[str] = None
     if user_text or persisted_refs:
@@ -744,7 +759,7 @@ async def send_message(
                     "sender_id": user.id,
                     "sender_name": user.full_name,
                     "content": display_text,
-                    "created_at": now.isoformat(),
+                    "created_at": _utc_iso(now),
                     "file_references": [r.model_dump() for r in persisted_refs],
                 },
             },
@@ -761,7 +776,7 @@ async def send_message(
                     "sender_id": None,
                     "sender_name": assigned_doctor_name or "MediSense AI",
                     "content": reply,
-                    "created_at": now.isoformat(),
+                    "created_at": _utc_iso(now),
                     "file_references": [],
                     "emergency_alert": emergency_meta,
                 },
@@ -853,7 +868,7 @@ async def update_message(
             "updated_message": {
                 "id": msg.id,
                 "content": msg.content,
-                "updated_at": msg.updated_at.isoformat(),
+                "updated_at": _utc_iso(msg.updated_at),
             },
         },
     )
@@ -922,7 +937,7 @@ async def update_message(
                         "sender_id": None,
                         "sender_name": assigned_doctor_name or "MediSense AI",
                         "content": reply,
-                        "created_at": now.isoformat(),
+                        "created_at": _utc_iso(now),
                         "file_references": [],
                     },
                 },
@@ -931,15 +946,15 @@ async def update_message(
     name_by_msg = await _resolve_sender_names(db, [msg], user.full_name)
 
     return PatientChatMessageDTO(
-        id=msg.id,
-        role=msg.role,  # type: ignore[arg-type]
-        content=msg.content,
-        created_at=msg.created_at,
-        updated_at=msg.updated_at,
-        file_references=_parse_file_refs(msg.file_references),
-        sender_type=msg.sender_type or _derive_sender_type(msg.role),  # type: ignore[arg-type]
-        sender_id=msg.sender_id,
-        sender_name=name_by_msg.get(msg.id),
+                id=msg.id,
+                role=msg.role,  # type: ignore[arg-type]
+                content=msg.content,
+                created_at=_as_utc(msg.created_at) or msg.created_at,
+                updated_at=_as_utc(msg.updated_at) if msg.updated_at else None,
+                file_references=_parse_file_refs(msg.file_references),
+                sender_type=msg.sender_type or _derive_sender_type(msg.role),  # type: ignore[arg-type]
+                sender_id=msg.sender_id,
+                sender_name=name_by_msg.get(msg.id),
         emergency_alert=_parse_emergency_alert(msg.message_metadata),
     )
 
@@ -982,8 +997,8 @@ async def get_history(
         sessions=[
             PatientChatSessionSummary(
                 id=s.id,
-                started_at=s.started_at,
-                ended_at=s.ended_at,
+                started_at=_as_utc(s.started_at) or s.started_at,
+                ended_at=_as_utc(s.ended_at) if s.ended_at else None,
                 title=s.title,
                 session_summary=s.session_summary,
                 message_count=s.message_count or 0,
@@ -1050,8 +1065,8 @@ async def get_session(
         session_id=session.id,
         patient_id=session.patient_id,
         patient_name=user.full_name,
-        started_at=session.started_at,
-        ended_at=session.ended_at,
+        started_at=_as_utc(session.started_at) or session.started_at,
+        ended_at=_as_utc(session.ended_at) if session.ended_at else None,
         session_summary=session.session_summary,
         doctor_joined=session.doctor_joined or False,
         specialty=session.specialty,
@@ -1064,7 +1079,7 @@ async def get_session(
                 id=m.id,
                 role=m.role,  # type: ignore[arg-type]
                 content=m.content,
-                created_at=m.created_at,
+                created_at=_as_utc(m.created_at) or m.created_at,
                 file_references=_parse_file_refs(m.file_references),
                 sender_type=m.sender_type or _derive_sender_type(m.role),  # type: ignore[arg-type]
                 sender_id=m.sender_id,
@@ -1116,7 +1131,7 @@ async def end_session(
 
     return EndSessionResponse(
         session_id=session.id,
-        ended_at=session.ended_at,
+        ended_at=_as_utc(session.ended_at) or session.ended_at,
         summary_generated=summary_will_run,
     )
 
